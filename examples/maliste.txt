@@ -1,0 +1,3 @@
+# Format: source|destination (destination optionnelle)
+C:\Samples\kick.ncw|C:\Samples\wav\kick.wav
+C:\Samples\snare.wav

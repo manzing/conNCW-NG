@@ -1,0 +1,16 @@
+[
+  {
+    "Label": "Kontakt-NCW-v1",
+    "HexBytes": "01A89ED631010000",
+    "Source": "known",
+    "AddedAt": "2026-08-03T00:00:00+00:00",
+    "Notes": "Signature historique d'origine (conNCW05 Delphi)."
+  },
+  {
+    "Label": "Kontakt-NCW-v2",
+    "HexBytes": "01A89ED630010000",
+    "Source": "known",
+    "AddedAt": "2026-08-03T00:00:00+00:00",
+    "Notes": "Variante historique observée (conNCW05 Delphi)."
+  }
+]

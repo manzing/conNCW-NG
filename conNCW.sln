@@ -1,0 +1,18 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ConNCW.Core", "src\ConNCW.Core\ConNCW.Core.csproj", "{A1111111-0000-0000-0000-000000000001}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ConNCW.Cli", "src\ConNCW.Cli\ConNCW.Cli.csproj", "{A2222222-0000-0000-0000-000000000002}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x64 = Debug|x64
+		Release|x64 = Release|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{A1111111-0000-0000-0000-000000000001}.Debug|x64.ActiveCfg = Debug|x64
+		{A1111111-0000-0000-0000-000000000001}.Release|x64.ActiveCfg = Release|x64
+		{A2222222-0000-0000-0000-000000000002}.Debug|x64.ActiveCfg = Debug|x64
+		{A2222222-0000-0000-0000-000000000002}.Release|x64.ActiveCfg = Release|x64
+	EndGlobalSection
+EndGlobal

@@ -1,0 +1,74 @@
+name: Build
+
+on:
+  push:
+    branches: [ "main", "master" ]
+    tags: [ "v*" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+env:
+  DOTNET_VERSION: "10.0.x"
+  CONFIGURATION: Release
+  PLATFORM: x64
+
+jobs:
+  build:
+    name: Build & Test
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET ${{ env.DOTNET_VERSION }}
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore dependencies
+        run: dotnet restore conNCW.sln
+
+      - name: Build
+        run: dotnet build conNCW.sln -c ${{ env.CONFIGURATION }} -p:Platform=${{ env.PLATFORM }} --no-restore
+
+      - name: Run tests (si présents)
+        run: dotnet test conNCW.sln -c ${{ env.CONFIGURATION }} -p:Platform=${{ env.PLATFORM }} --no-build --verbosity normal
+        continue-on-error: true
+
+      - name: Publish CLI (framework-dependent)
+        run: >
+          dotnet publish src/ConNCW.Cli/ConNCW.Cli.csproj
+          -c ${{ env.CONFIGURATION }}
+          -r win-x64
+          -p:Platform=${{ env.PLATFORM }}
+          --self-contained false
+          -o publish/framework-dependent
+
+      - name: Publish CLI (self-contained, single-file)
+        run: >
+          dotnet publish src/ConNCW.Cli/ConNCW.Cli.csproj
+          -c ${{ env.CONFIGURATION }}
+          -r win-x64
+          -p:Platform=${{ env.PLATFORM }}
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -o publish/self-contained
+
+      - name: Upload build output (framework-dependent)
+        uses: actions/upload-artifact@v4
+        with:
+          name: conncw-win-x64-framework-dependent
+          path: publish/framework-dependent/**
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload build output (self-contained)
+        uses: actions/upload-artifact@v4
+        with:
+          name: conncw-win-x64-self-contained
+          path: publish/self-contained/**
+          if-no-files-found: error
+          retention-days: 30

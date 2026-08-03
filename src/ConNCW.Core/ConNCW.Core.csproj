@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>ConNCW.Core</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="Signatures\signatures.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

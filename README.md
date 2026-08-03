@@ -1,9 +1,9 @@
-# conNCW (portage C# / .NET 10)
+# conNCW-NG (portage C# / .NET 10)
 
-Portage complet du logiciel Delphi historique **conNCW05** (conversion NCW <-> WAV,
+Portage complet du logiciel Delphi historique **conNCW** (conversion NCW <-> WAV,
 Native Instruments Kontakt) vers .NET 10 LTS, x64, avec corrections de robustesse.
 
-## Statut : Projet complet (étapes 1 à 3 livrées)
+## Statut : en cours
 
 ### Corrections apportées par rapport à l'original
 - **Signature NCW** : comparaison en bloc entier via une liste extensible
@@ -81,36 +81,9 @@ src/
 dotnet build -c Release -p:Platform=x64
 ```
 
-## Publication autonome (optionnel, à activer si besoin)
+## Publication autonome
 
 ```
 dotnet publish src/ConNCW.Cli -c Release -r win-x64 --self-contained -p:PublishAot=true
 ```
 
-## CI/CD (GitHub Actions)
-
-Deux workflows sont fournis dans `.github/workflows/` :
-
-- **`build.yml`** : déclenché sur push/PR vers `main`/`master`. Restore, build,
-  exécute les tests (si présents, `continue-on-error` pour ne pas bloquer tant
-  qu'il n'y en a pas encore), puis publie deux variantes de l'exécutable
-  (framework-dependent et self-contained single-file win-x64) en artefacts
-  téléchargeables (30 jours de rétention).
-- **`release.yml`** : déclenché sur un tag `v*` (ex. `v1.0.0`). Publie un
-  exécutable self-contained single-file win-x64, le zippe, l'attache comme
-  artefact ET crée automatiquement une GitHub Release avec le zip joint.
-
-`global.json` fixe le SDK sur .NET 10 (`rollForward: latestFeature`) pour
-garantir des builds reproductibles en CI comme en local.
-
-Pour déclencher une release :
-```
-git tag v1.0.0
-git push origin v1.0.0
-```
-
-## Prochaine étape : tests
-
-Le testing (unitaire + validation sur tes fichiers NCW/WAV réels, notamment
-ceux à signature non reconnue) est prévu comme phase suivante, une fois cette
-livraison relue.

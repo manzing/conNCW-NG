@@ -85,7 +85,7 @@ public sealed class NcwFile
 
     private static int[] DecodeBlocks(FileStream stream, BinaryReader reader, NcwHeader header)
     {
-        int channels = Math.Max(header.Channels, 1);
+        int channels = Math.Max((int)header.Channels, 1);
         long totalFrames = header.NumSamples;
         var samples = new int[totalFrames * channels];
 
@@ -213,7 +213,7 @@ public sealed class NcwFile
 
     public void Save(string path)
     {
-        int channels = Math.Max(Header.Channels, 1);
+        int channels = Math.Max((int)Header.Channels, 1);
         int totalFrames = (int)Header.NumSamples;
         int blockCount = Header.BlockCount;
 

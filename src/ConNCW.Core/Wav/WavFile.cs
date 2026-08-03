@@ -18,7 +18,6 @@ public sealed class WavFile
         AudioData = audioData;
     }
 
-
     /// <summary>Construit un WavFile en mémoire à partir de PCM brut déjà encodé en octets (utilisé par le bypass runner).</summary>
     public static WavFile FromRaw(AudioFormat format, byte[] pcmBytes)
     {
@@ -99,7 +98,7 @@ public sealed class WavFile
 
         int bytesPerSample = format.BitsPerSample / 8;
         uint sampleCount = bytesPerSample > 0
-            ? (uint)(audioData.Length / (bytesPerSample * Math.Max(format.Channels, 1)))
+            ? (uint)(audioData.Length / (bytesPerSample * Math.Max((int)format.Channels, 1)))
             : 0;
 
         format = format with { SampleCount = sampleCount };

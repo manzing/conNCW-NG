@@ -383,15 +383,20 @@ public sealed class NcwFile
         }
         return 32;
     }
+}
 
-    public sealed class UnknownNcwSignatureException : Exception
+/// <summary>
+/// Classe top-level (et non imbriquée dans NcwFile) : c'est ce qui permet à
+/// ConversionEngine.cs et aux autres consommateurs de la référencer directement
+/// via "using ConNCW.Core.Ncw;" sans la qualifier en "NcwFile.UnknownNcwSignatureException".
+/// </summary>
+public sealed class UnknownNcwSignatureException : Exception
+{
+    public byte[] Signature { get; }
+
+    public UnknownNcwSignatureException(byte[] signature)
+        : base($"Signature NCW inconnue: {Convert.ToHexString(signature)}")
     {
-        public byte[] Signature { get; }
-
-        public UnknownNcwSignatureException(byte[] signature)
-            : base($"Signature NCW inconnue: {Convert.ToHexString(signature)}")
-        {
-            Signature = signature;
-        }
+        Signature = signature;
     }
 }

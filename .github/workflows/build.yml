@@ -28,18 +28,18 @@ jobs:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: Restore dependencies
-        run: dotnet restore conNCW.sln
+        run: dotnet restore conNCW-NG.sln
 
       - name: Build
-        run: dotnet build conNCW.sln -c ${{ env.CONFIGURATION }} -p:Platform=${{ env.PLATFORM }} --no-restore
+        run: dotnet build conNCW-NG.sln -c ${{ env.CONFIGURATION }} -p:Platform=${{ env.PLATFORM }} --no-restore
 
       - name: Run tests (si présents)
-        run: dotnet test conNCW.sln -c ${{ env.CONFIGURATION }} -p:Platform=${{ env.PLATFORM }} --no-build --verbosity normal
+        run: dotnet test conNCW-NG.sln -c ${{ env.CONFIGURATION }} -p:Platform=${{ env.PLATFORM }} --no-build --verbosity normal
         continue-on-error: true
 
       - name: Publish CLI (framework-dependent)
         run: >
-          dotnet publish src/ConNCW.Cli/ConNCW.Cli.csproj
+          dotnet publish src/ConNCW.Cli/ConNCW-NG.Cli.csproj
           -c ${{ env.CONFIGURATION }}
           -r win-x64
           -p:Platform=${{ env.PLATFORM }}
@@ -48,7 +48,7 @@ jobs:
 
       - name: Publish CLI (self-contained, single-file)
         run: >
-          dotnet publish src/ConNCW.Cli/ConNCW.Cli.csproj
+          dotnet publish src/ConNCW.Cli/ConNCW-NG.Cli.csproj
           -c ${{ env.CONFIGURATION }}
           -r win-x64
           -p:Platform=${{ env.PLATFORM }}

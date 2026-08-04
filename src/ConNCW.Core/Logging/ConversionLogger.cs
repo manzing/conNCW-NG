@@ -4,10 +4,14 @@ using ConNCW.Core.Models;
 namespace ConNCW.Core.Logging;
 
 /// <summary>
-/// Console logging (a single line overwritten continuously, to avoid
-/// spamming large batches) + a persistent log file limited to failures
-/// (to avoid saturating the log file on batches of several thousand
-/// mostly-successful files).
+/// Console logging with a two-row live display:
+///   Row 1 (printed once per folder change, not per file — negligible cost):
+///     "Folder: <current folder being converted>"
+///   Row 2 (overwritten in place for every file, via \r, no cursor repositioning):
+///     "[HH:mm:ss] STATUS   <file name>"
+/// Plus a persistent log file limited to failures (full detail, untruncated),
+/// to avoid saturating the log file on batches of several thousand
+/// mostly-successful files.
 /// </summary>
 public sealed class ConversionLogger : IDisposable
 {
@@ -17,11 +21,8 @@ public sealed class ConversionLogger : IDisposable
     private int _toleratedCount;
     private int _totalCount;
 
-    // Console line overwrite: no additional cost compared to the previous
-    // Console.WriteLine (a single Write per file, no SetCursorPosition, no
-    // window-size recalculation beyond a single width read). Disabled if
-    // output is redirected (file/CI), since \r has no meaning there.
     private int _lastConsoleLineLength;
+    private string? _lastFolder;
     private readonly bool _interactive = !Console.IsOutputRedirected;
 
     public ConversionLogger(string logFilePath)
@@ -47,25 +48,40 @@ public sealed class ConversionLogger : IDisposable
             ConversionStatus.FailCorruptData or
             ConversionStatus.FailIoError;
 
-        // Log file: failures only, full untruncated line, to avoid
-        // saturating the file on batches of several thousand successful
-        // files while keeping full diagnostic detail for the ones that fail.
+        // Log file: failures only, full untruncated line with full path.
         if (isFailure)
         {
             _fileWriter.WriteLine(fullLine);
         }
 
-        // Console: overwrite the previous line instead of stacking a new
-        // one, regardless of status (success or failure).
         if (_interactive)
         {
-            // Critical: \r only returns the cursor to the start of the
-            // CURRENT visual row. If the line is longer than the terminal
-            // width, the console auto-wraps it onto a second row, and \r
-            // can no longer reach the true start of the line -> the overwrite
-            // silently breaks and every file appears to print a new line.
-            // Truncating to the window width prevents wrapping entirely.
-            string consoleLine = TruncateForConsole(fullLine);
+            string? folder = Path.GetDirectoryName(result.SourcePath);
+            folder ??= string.Empty;
+
+            // Row 1: only reprinted when the folder actually changes.
+            // This is a normal WriteLine (scrolls, doesn't overwrite), but it
+            // fires once per folder, not once per file, so the cost is
+            // negligible even across thousands of files.
+            if (folder != _lastFolder)
+            {
+                if (_lastConsoleLineLength > 0)
+                {
+                    Console.WriteLine(); // close the previous file-row overwrite cleanly
+                    _lastConsoleLineLength = 0;
+                }
+
+                Console.WriteLine(TruncateForConsole($"Folder: {folder}"));
+                _lastFolder = folder;
+            }
+
+            // Row 2: overwritten in place for every file (short content:
+            // file name only, not the full path, so it fits without needing
+            // to resize the window).
+            string status = StatusLabel(result.Status);
+            string sig = result.SignatureHex is not null ? $" [sig: {result.SignatureHex}]" : string.Empty;
+            string fileLine = $"[{DateTimeOffset.Now:HH:mm:ss}] {status,-28} {Path.GetFileName(result.SourcePath)}{sig}";
+            string consoleLine = TruncateForConsole(fileLine);
 
             int pad = _lastConsoleLineLength - consoleLine.Length;
             Console.Write('\r' + consoleLine + (pad > 0 ? new string(' ', pad) : string.Empty));
@@ -94,23 +110,18 @@ public sealed class ConversionLogger : IDisposable
 
     /// <summary>
     /// Shortens a line so it never exceeds the terminal width, preventing
-    /// the auto-wrap that breaks the \r overwrite trick. Truncates from the
-    /// middle of the path (keeps the status/timestamp prefix and the file
-    /// name, which are the most useful parts to see at a glance).
+    /// the auto-wrap that would otherwise break the \r overwrite trick.
     /// </summary>
     private static string TruncateForConsole(string line)
     {
         int width;
         try
         {
-            // -1 to always leave the very last column free: some terminals
-            // auto-wrap as soon as a character is written into the last
-            // column, even before a new one arrives.
             width = Math.Max(Console.WindowWidth - 1, 20);
         }
         catch
         {
-            width = 119; // fallback if the console has no window (e.g. service)
+            width = 119;
         }
 
         if (line.Length <= width)
@@ -119,26 +130,27 @@ public sealed class ConversionLogger : IDisposable
         }
 
         const string ellipsis = "...";
-        int keepEnd = Math.Min(40, width / 3);       // keep the file name / tail
+        int keepEnd = Math.Min(40, width / 3);
         int keepStart = width - keepEnd - ellipsis.Length;
         if (keepStart < 0) keepStart = 0;
 
         return string.Concat(line.AsSpan(0, keepStart), ellipsis, line.AsSpan(line.Length - keepEnd, keepEnd));
     }
 
+    private static string StatusLabel(ConversionStatus status) => status switch
+    {
+        ConversionStatus.Ok => "OK",
+        ConversionStatus.OkToleratedSignature => "OK (tolerated signature)",
+        ConversionStatus.OkBypassTest => "OK (bypass test)",
+        ConversionStatus.FailUnknownSignature => "FAILED (unknown signature)",
+        ConversionStatus.FailCorruptData => "FAILED (corrupt data)",
+        ConversionStatus.FailIoError => "FAILED (I/O error)",
+        _ => "?"
+    };
+
     private static string FormatLine(ConversionResult r)
     {
-        string status = r.Status switch
-        {
-            ConversionStatus.Ok => "OK",
-            ConversionStatus.OkToleratedSignature => "OK (tolerated signature)",
-            ConversionStatus.OkBypassTest => "OK (bypass test)",
-            ConversionStatus.FailUnknownSignature => "FAILED (unknown signature)",
-            ConversionStatus.FailCorruptData => "FAILED (corrupt data)",
-            ConversionStatus.FailIoError => "FAILED (I/O error)",
-            _ => "?"
-        };
-
+        string status = StatusLabel(r.Status);
         string sig = r.SignatureHex is not null ? $" [sig: {r.SignatureHex}]" : string.Empty;
         string msg = r.Message is not null ? $" — {r.Message}" : string.Empty;
         return $"[{DateTimeOffset.Now:HH:mm:ss}] {status,-28} {r.SourcePath}{sig}{msg}";
@@ -169,20 +181,13 @@ public sealed class ConversionLogger : IDisposable
 
         string summary = sb.ToString();
 
-        // End the current overwritten line before printing the summary, so
-        // the last progress line doesn't visually merge with the recap.
         if (_interactive && _lastConsoleLineLength > 0)
         {
             Console.WriteLine();
             _lastConsoleLineLength = 0;
         }
 
-        // Kept on screen at the end of the run (new behavior), not just
-        // scrolled away.
         Console.WriteLine(summary);
-
-        // The full summary (including the list of failures) always goes to
-        // the log file.
         _fileWriter.WriteLine(summary);
     }
 

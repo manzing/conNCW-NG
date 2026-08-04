@@ -24,11 +24,11 @@ jobs:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: Restore
-        run: dotnet restore conNCW.sln
+        run: dotnet restore conNCW-NG.sln
 
       - name: Publish self-contained single-file (win-x64)
         run: >
-          dotnet publish src/ConNCW.Cli/ConNCW.Cli.csproj
+          dotnet publish src/ConNCW.Cli/conNCW-NG.Cli.csproj
           -c ${{ env.CONFIGURATION }}
           -r win-x64
           -p:Platform=${{ env.PLATFORM }}
@@ -51,5 +51,5 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: conncw-${{ github.ref_name }}-win-x64.zip
+          files: conNCW-NG-${{ github.ref_name }}-win-x64.zip
           generate_release_notes: true

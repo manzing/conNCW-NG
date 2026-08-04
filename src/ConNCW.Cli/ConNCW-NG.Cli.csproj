@@ -9,7 +9,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
     <RootNamespace>ConNCW.Cli</RootNamespace>
-    <AssemblyName>conncw</AssemblyName>
+    <AssemblyName>conNCW-NG</AssemblyName>
 
     <!-- Options de publication autonome (à activer via dotnet publish -p:PublishAot=true si besoin) -->
     <InvariantGlobalization>true</InvariantGlobalization>

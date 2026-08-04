@@ -4,8 +4,10 @@ using ConNCW.Core.Models;
 namespace ConNCW.Core.Logging;
 
 /// <summary>
-/// Logging console (défilement en direct, comme l'original) + fichier de log persistant
-/// (nouveauté demandée : trace de tous les fichiers, notamment les échecs).
+/// Console logging (a single line overwritten continuously, to avoid
+/// spamming large batches) + a persistent log file limited to failures
+/// (to avoid saturating the log file on batches of several thousand
+/// mostly-successful files).
 /// </summary>
 public sealed class ConversionLogger : IDisposable
 {
@@ -15,6 +17,13 @@ public sealed class ConversionLogger : IDisposable
     private int _toleratedCount;
     private int _totalCount;
 
+    // Console line overwrite: no additional cost compared to the previous
+    // Console.WriteLine (a single Write per file, no SetCursorPosition, no
+    // window-size recalculation). Disabled if output is redirected
+    // (file/CI), since \r has no meaning there.
+    private int _lastConsoleLineLength;
+    private readonly bool _interactive = !Console.IsOutputRedirected;
+
     public ConversionLogger(string logFilePath)
     {
         string? dir = Path.GetDirectoryName(logFilePath);
@@ -22,8 +31,10 @@ public sealed class ConversionLogger : IDisposable
         {
             Directory.CreateDirectory(dir);
         }
+
         _fileWriter = new StreamWriter(logFilePath, append: false, Encoding.UTF8) { AutoFlush = true };
-        _fileWriter.WriteLine($"=== conNCW log — démarré le {DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss} ===");
+        _fileWriter.WriteLine($"=== conNCW log — started on {DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss} ===");
+        _fileWriter.WriteLine("(only failures are logged line by line; the final summary recaps the totals)");
     }
 
     public void Report(ConversionResult result)
@@ -31,10 +42,30 @@ public sealed class ConversionLogger : IDisposable
         _totalCount++;
         string line = FormatLine(result);
 
-        // Console : défilement en direct, comme le comportement original.
-        Console.WriteLine(line);
+        bool isFailure = result.Status is
+            ConversionStatus.FailUnknownSignature or
+            ConversionStatus.FailCorruptData or
+            ConversionStatus.FailIoError;
 
-        _fileWriter.WriteLine(line);
+        // Log file: failures only, to avoid saturating the file on batches
+        // of several thousand successful files.
+        if (isFailure)
+        {
+            _fileWriter.WriteLine(line);
+        }
+
+        // Console: overwrite the previous line instead of stacking a new
+        // one, regardless of status (success or failure).
+        if (_interactive)
+        {
+            int pad = _lastConsoleLineLength - line.Length;
+            Console.Write('\r' + line + (pad > 0 ? new string(' ', pad) : string.Empty));
+            _lastConsoleLineLength = line.Length;
+        }
+        else
+        {
+            Console.WriteLine(line);
+        }
 
         switch (result.Status)
         {
@@ -57,11 +88,11 @@ public sealed class ConversionLogger : IDisposable
         string status = r.Status switch
         {
             ConversionStatus.Ok => "OK",
-            ConversionStatus.OkToleratedSignature => "OK (signature tolérée)",
-            ConversionStatus.OkBypassTest => "OK (test bypass)",
-            ConversionStatus.FailUnknownSignature => "ECHEC (signature inconnue)",
-            ConversionStatus.FailCorruptData => "ECHEC (données corrompues)",
-            ConversionStatus.FailIoError => "ECHEC (erreur E/S)",
+            ConversionStatus.OkToleratedSignature => "OK (tolerated signature)",
+            ConversionStatus.OkBypassTest => "OK (bypass test)",
+            ConversionStatus.FailUnknownSignature => "FAILED (unknown signature)",
+            ConversionStatus.FailCorruptData => "FAILED (corrupt data)",
+            ConversionStatus.FailIoError => "FAILED (I/O error)",
             _ => "?"
         };
 
@@ -71,32 +102,44 @@ public sealed class ConversionLogger : IDisposable
     }
 
     /// <summary>
-    /// Affiche le récapitulatif final : conservé à l'écran (nouveauté) plutôt que
-    /// simplement défilé et perdu, plus écrit dans le fichier de log.
+    /// Displays the final summary: kept on screen (new behavior) instead of
+    /// simply scrolling away and being lost, plus written to the log file.
     /// </summary>
     public void WriteSummary()
     {
         var sb = new StringBuilder();
         sb.AppendLine();
-        sb.AppendLine("=== Résumé ===");
-        sb.AppendLine($"Total traités   : {_totalCount}");
-        sb.AppendLine($"Réussis         : {_okCount} (dont {_toleratedCount} en mode toléré/bypass)");
-        sb.AppendLine($"Échecs          : {_failures.Count}");
+        sb.AppendLine("=== Summary ===");
+        sb.AppendLine($"Total processed : {_totalCount}");
+        sb.AppendLine($"Succeeded : {_okCount} (including {_toleratedCount} in tolerated/bypass mode)");
+        sb.AppendLine($"Failed : {_failures.Count}");
 
         if (_failures.Count > 0)
         {
             sb.AppendLine();
-            sb.AppendLine("Fichiers en échec :");
+            sb.AppendLine("Failed files:");
             foreach (var f in _failures)
             {
-                sb.AppendLine($"  - {f.SourcePath} ({f.Status}){(f.SignatureHex is not null ? $" [sig: {f.SignatureHex}]" : string.Empty)}");
+                sb.AppendLine($" - {f.SourcePath} ({f.Status}){(f.SignatureHex is not null ? $" [sig: {f.SignatureHex}]" : string.Empty)}");
             }
         }
 
         string summary = sb.ToString();
 
-        // Conservé à l'écran en fin d'exécution (nouveauté), pas juste défilé.
+        // End the current overwritten line before printing the summary, so
+        // the last progress line doesn't visually merge with the recap.
+        if (_interactive && _lastConsoleLineLength > 0)
+        {
+            Console.WriteLine();
+            _lastConsoleLineLength = 0;
+        }
+
+        // Kept on screen at the end of the run (new behavior), not just
+        // scrolled away.
         Console.WriteLine(summary);
+
+        // The full summary (including the list of failures) always goes to
+        // the log file
         _fileWriter.WriteLine(summary);
     }
 

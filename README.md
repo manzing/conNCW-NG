@@ -1,78 +1,79 @@
-# conNCW-NG (portage C# / .NET 10)
+# conNCW-NG (C# / .NET 10 port)
 
-Portage complet du logiciel Delphi historique **conNCW** (conversion NCW <-> WAV,
-Native Instruments Kontakt) vers .NET 10 LTS, x64, avec corrections de robustesse.
+Full port of the legacy Delphi software **conNCW** (NCW <-> WAV conversion,
+Native Instruments Kontakt) to .NET 10 LTS, x64, with robustness fixes.
 
-## Statut : en cours
+## Status: in progress
 
-### Corrections apportées par rapport à l'original
-- **Signature NCW** : comparaison en bloc entier via une liste extensible
-  (`signatures.json`) au lieu d'une comparaison octet-par-octet contre deux
-  valeurs figées — élimine les faux négatifs sur les variantes non documentées.
-- **Parcours récursif** : `Directory.EnumerateFiles(..., SearchOption.AllDirectories)`,
-  qui corrige définitivement le bug 0.5 ("le programme ne traitait pas les
-  fichiers s'il n'y en avait pas directement à la racine du dossier").
-- **Parsing WAV** : parseur générique par chunks RIFF qui ignore proprement les
-  chunks inconnus (`LIST`, `JUNK`, `fact`, `PEAK`, `bext`, ...) au lieu de
-  planter, contrairement au comportement original rigide.
-- **Logging** : ajout d'un vrai fichier de log horodaté (absent de l'original),
-  en complément de la console qui défile en direct comme avant ; un résumé
-  final (réussites / échecs détaillés) reste affiché à l'écran en fin de run.
+### Fixes applied compared to the original
+- **NCW signature**: whole-block comparison against an extensible list
+  (`signatures.json`) instead of a byte-by-byte comparison against two
+  hardcoded values — eliminates false negatives on undocumented variants.
+- **Recursive traversal**: `Directory.EnumerateFiles(..., SearchOption.AllDirectories)`,
+  which permanently fixes bug 0.5 ("the program did not process files unless
+  some were present directly at the root of the folder").
+- **WAV parsing**: generic chunk-based RIFF parser that properly skips
+  unknown chunks (`LIST`, `JUNK`, `fact`, `PEAK`, `bext`, ...) instead of
+  crashing, unlike the original's rigid behavior.
+- **Logging**: added a proper timestamped log file (absent from the
+  original), in addition to the live-scrolling console output as before; a
+  final summary (detailed successes/failures) is still displayed on screen at
+  the end of each run.
 
-## Nouveaux flags (en plus de la syntaxe d'origine, inchangée)
+## New flags (in addition to the original syntax, unchanged)
 
-| Flag | Rôle |
+| Flag | Purpose |
 |---|---|
-| `--learn-signature <fichier.ncw>` | Analyse la signature du fichier, demande confirmation interactive, puis l'ajoute à `signatures.json` |
-| `--label <texte>` | Label à associer à la signature apprise (utilisé avec `--learn-signature`) |
-| `--bypass-signature` | Force le décodage NCW en ignorant la signature, analyse le flux PCM obtenu (heuristiques de plausibilité), écrit un WAV de test dans `_bypass_test/` pour écoute manuelle avant validation |
-| `--log <chemin>` | Chemin du fichier de log (par défaut `conncw_<timestamp>.log`) |
+| `--learn-signature <file.ncw>` | Analyzes the file's signature, asks for interactive confirmation, then adds it to `signatures.json` |
+| `--label <text>` | Label to associate with the learned signature (used with `--learn-signature`) |
+| `--bypass-signature` | Forces NCW decoding while ignoring the signature, analyzes the resulting PCM stream (plausibility heuristics), writes a test WAV to `_bypass_test/` for manual listening before validation |
+| `--log <path>` | Path to the log file (default `conncw_<timestamp>.log`) |
 
-## Syntaxe d'origine conservée à l'identique
+## Original syntax preserved identically
 
 ```
-conncw fichier.ncw [fichier.wav]              # mode fichier, auto-détection direction
-conncw dossier_src dossier_dst -n2w -r        # mode dossier, NCW->WAV, récursif
-conncw dossier_src dossier_dst -w2n -r -rw    # mode dossier, WAV->NCW, récursif, écrase existants
-conncw -l @maliste.txt                         # mode liste
+conncw file.ncw [file.wav]                    # file mode, direction auto-detected
+conncw src_folder dst_folder -n2w -r          # folder mode, NCW->WAV, recursive
+conncw src_folder dst_folder -w2n -r -rw      # folder mode, WAV->NCW, recursive, overwrite existing
+conncw -l @mylist.txt                          # list mode
 ```
 
-## Workflow recommandé pour les signatures inconnues
+## Recommended workflow for unknown signatures
 
-1. Lancer une conversion normale : les fichiers à signature inconnue sont
-   rejetés proprement avec `[FAIL] ... signature inconnue: <hex>` en console
-   et dans le log.
-2. Tester la plausibilité sans écrire de vrai fichier de sortie :
+1. Run a normal conversion: files with an unknown signature are cleanly
+   rejected with `[FAIL] ... unknown signature: <hex>` in the console and
+   in the log.
+2. Test plausibility without writing an actual output file:
    ```
-   conncw fichier_suspect.ncw --bypass-signature
+   conncw suspect_file.ncw --bypass-signature
    ```
-   → génère un WAV de test dans `_bypass_test/` + un score de confiance et
-   des avertissements (silence anormal, clipping, débordement de plage).
-3. Écouter le WAV de test (ou vérifier dans Kontakt) pour confirmer que le
-   fichier est valide.
-4. Si validé, apprendre la signature :
+   → generates a test WAV in `_bypass_test/` plus a confidence score and
+   warnings (abnormal silence, clipping, range overflow).
+3. Listen to the test WAV (or check in Kontakt) to confirm the file is
+   valid.
+4. If validated, learn the signature:
    ```
-   conncw --learn-signature fichier_suspect.ncw --label "Kontakt7-variant"
+   conncw --learn-signature suspect_file.ncw --label "Kontakt7-variant"
    ```
-   → confirmation interactive avant écriture dans `signatures.json`.
-5. Les prochains runs reconnaîtront automatiquement cette signature.
+   → interactive confirmation before writing to `signatures.json`.
+5. Future runs will automatically recognize this signature.
 
-## Structure du projet
+## Project structure
 
 ```
 src/
   ConNCW.Core/
     Models/       AudioFormat, NcwHeader, ConversionResult
     Signatures/   SignatureStore, SignatureEntry, SignatureLearner, signatures.json
-    Bit/          BitReader, BitWriter (remplace les pointeurs bruts Delphi)
+    Bit/          BitReader, BitWriter (replaces raw Delphi pointers)
     Ncw/          NcwFile (decode/encode), NcwBlockHeader
-    Wav/          WavFile (parseur RIFF générique), WavFileFactory
-    IO/           FileScanner (fix récursivité)
-    Logging/      ConversionLogger (console + fichier + résumé)
-    Bypass/       BypassAnalyzer (heuristiques), BypassRunner (orchestration)
-    Engine/       ConversionEngine (cœur d'orchestration, 3 modes)
+    Wav/          WavFile (generic RIFF parser), WavFileFactory
+    IO/           FileScanner (recursion fix)
+    Logging/      ConversionLogger (console + file + summary)
+    Bypass/       BypassAnalyzer (heuristics), BypassRunner (orchestration)
+    Engine/       ConversionEngine (orchestration core, 3 modes)
   ConNCW.Cli/
-    Program.cs    CLI System.CommandLine, parité syntaxe + nouveaux flags
+    Program.cs    System.CommandLine CLI, syntax parity + new flags
 ```
 
 ## Build
@@ -81,9 +82,10 @@ src/
 dotnet build -c Release -p:Platform=x64
 ```
 
-## Publication autonome
+## Self-contained publishing
 
 ```
 dotnet publish src/ConNCW.Cli -c Release -r win-x64 --self-contained -p:PublishAot=true
 ```
+
 

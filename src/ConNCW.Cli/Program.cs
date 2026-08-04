@@ -4,17 +4,19 @@ using ConNCW.Core.Engine;
 using ConNCW.Core.Logging;
 using ConNCW.Core.Signatures;
 
+
 namespace ConNCW.Cli;
 
+
 /// <summary>
-/// CLI conNCW, portage de conNCW05.dpr / main.inc.
-/// Parité de syntaxe avec l'original : -w2n, -n2w, -r, -rw, -l, -whs/-whe/-wha,
-/// plus nouveaux flags --learn-signature et --bypass-signature.
+/// conNCW-NG CLI, port of conNCW / main.inc.
+/// Syntax parity with the original: -w2n, -n2w, -r, -rw, -l, -whs/-whe/-wha,
+/// plus new flags --learn-signature and --bypass-signature.
 /// </summary>
 public static class Program
 {
     public static int Main(string[] args)
-    {
+    {   args = CommandLineFix.GetCorrectedArgs();
         string exeDir = AppContext.BaseDirectory;
         string signaturesPath = Path.Combine(exeDir, "Signatures", "signatures.json");
         if (!File.Exists(signaturesPath))
@@ -22,24 +24,22 @@ public static class Program
             signaturesPath = Path.Combine(exeDir, "signatures.json");
         }
 
-        var rootCommand = new RootCommand("conNCW - conversion NCW <-> WAV (portage C#/.NET 10)");
+        var rootCommand = new RootCommand("conNCW - NCW <-> WAV conversion (C#/.NET 10 port)");
+        var sourceArg = new Argument<string>("source") { Description = "Source file or folder" };
+        var destArg = new Argument<string?>("destination") { Description = "Destination file or folder", DefaultValueFactory = _ => null };
+        var w2nOption = new Option<bool>("-w2n") { Description = "Convert WAV -> NCW (folder mode)" };
+        var n2wOption = new Option<bool>("-n2w") { Description = "Convert NCW -> WAV (folder mode)" };
+        var recOption = new Option<bool>("-r", "-rec") { Description = "Recursive processing of subdirectories" };
+        var rewriteOption = new Option<bool>("-rw", "-rewrite") { Description = "Overwrite existing destination files" };
+        var listOption = new Option<string?>("-l") { Description = "List mode: @conncwlist file" };
+        var whsOption = new Option<bool>("-whs") { Description = "Standard WAV header" };
+        var wheOption = new Option<bool>("-whe") { Description = "Extended WAV header" };
+        var whaOption = new Option<bool>("-wha") { Description = "Auto WAV header" };
+        var bypassOption = new Option<bool>("--bypass-signature") { Description = "Force NCW decoding while ignoring the signature (plausibility test)" };
+        var logOption = new Option<string?>("--log") { Description = "Log file path (default: conncw_<timestamp>.log)" };
+        var learnOption = new Option<string?>("--learn-signature") { Description = "Analyzes an NCW file and offers to add its signature to signatures.json" };
+        var labelOption = new Option<string?>("--label") { Description = "Label to associate with the learned signature" };
 
-        var sourceArg = new Argument<string>("source") { Description = "Fichier ou dossier source" };
-        var destArg = new Argument<string?>("destination") { Description = "Fichier ou dossier destination", DefaultValueFactory = _ => null };
-
-        var w2nOption = new Option<bool>("-w2n") { Description = "Convertir WAV -> NCW (mode dossier)" };
-        var n2wOption = new Option<bool>("-n2w") { Description = "Convertir NCW -> WAV (mode dossier)" };
-        var recOption = new Option<bool>("-r", "-rec") { Description = "Traitement récursif des sous-répertoires" };
-        var rewriteOption = new Option<bool>("-rw", "-rewrite") { Description = "Écraser les fichiers de destination existants" };
-        var listOption = new Option<string?>("-l") { Description = "Mode liste : fichier @conncwlist" };
-        var whsOption = new Option<bool>("-whs") { Description = "En-tête WAV standard" };
-        var wheOption = new Option<bool>("-whe") { Description = "En-tête WAV étendu" };
-        var whaOption = new Option<bool>("-wha") { Description = "En-tête WAV auto" };
-        var bypassOption = new Option<bool>("--bypass-signature") { Description = "Forcer le décodage NCW en ignorant la signature (test de plausibilité)" };
-        var logOption = new Option<string?>("--log") { Description = "Chemin du fichier de log (par défaut: conncw_<timestamp>.log)" };
-
-        var learnOption = new Option<string?>("--learn-signature") { Description = "Analyse un fichier NCW et propose d'ajouter sa signature à signatures.json" };
-        var labelOption = new Option<string?>("--label") { Description = "Label à associer à la signature apprise" };
 
         foreach (var opt in new Option[] { w2nOption, n2wOption, recOption, rewriteOption, listOption, whsOption, wheOption, whaOption, bypassOption, logOption, learnOption, labelOption })
         {
@@ -47,6 +47,7 @@ public static class Program
         }
         rootCommand.Add(sourceArg);
         rootCommand.Add(destArg);
+
 
         rootCommand.SetAction(parseResult =>
         {
@@ -69,6 +70,7 @@ public static class Program
             return RunConversion(source, dest, w2n, n2w, recursive, rewrite, listFile, bypass, logPath, signaturesPath);
         });
 
+
         return rootCommand.Parse(args).Invoke();
     }
 
@@ -76,21 +78,23 @@ public static class Program
     {
         if (!File.Exists(ncwPath))
         {
-            Console.Error.WriteLine($"Fichier introuvable : {ncwPath}");
+            Console.Error.WriteLine($"File not found: {ncwPath}");
             return 1;
         }
 
+
         var preview = SignatureLearner.PreviewSignature(ncwPath);
-        Console.WriteLine($"Signature détectée : {preview.HexBytes}");
+        Console.WriteLine($"Detected signature: {preview.HexBytes}");
         Console.WriteLine();
-        Console.WriteLine("Avez-vous vérifié que ce fichier se charge correctement");
-        Console.WriteLine("(dans Kontakt, ou via --bypass-signature + écoute du WAV de test) ?");
-        Console.Write($"Ajouter cette signature à signatures.json ? [y/N] ");
+        Console.WriteLine("Have you verified that this file loads correctly");
+        Console.WriteLine("(in Kontakt, or via --bypass-signature + listening to the test WAV)?");
+        Console.Write($"Add this signature to signatures.json? [y/N] ");
         var answer = Console.ReadLine();
+
 
         if (!string.Equals(answer?.Trim(), "y", StringComparison.OrdinalIgnoreCase))
         {
-            Console.WriteLine("Annulé, aucune modification apportée.");
+            Console.WriteLine("Cancelled, no changes made.");
             return 0;
         }
 
@@ -98,10 +102,12 @@ public static class Program
             ? $"learned-{DateTime.Now:yyyyMMdd-HHmmss}"
             : label!;
 
-        var store = new SignatureStore(signaturesPath);
-        SignatureLearner.Confirm(store, preview.SignatureBytes, finalLabel, $"Appris depuis {Path.GetFileName(ncwPath)}");
 
-        Console.WriteLine($"Signature ajoutée avec le label \"{finalLabel}\".");
+        var store = new SignatureStore(signaturesPath);
+        SignatureLearner.Confirm(store, preview.SignatureBytes, finalLabel, $"Learned from {Path.GetFileName(ncwPath)}");
+
+
+        Console.WriteLine($"Signature added with label \"{finalLabel}\".");
         return 0;
     }
 
@@ -111,6 +117,7 @@ public static class Program
     {
         var signatures = new SignatureStore(signaturesPath);
         string effectiveLogPath = logPath ?? $"conncw_{DateTime.Now:yyyyMMdd_HHmmss}.log";
+
 
         using var logger = new ConversionLogger(effectiveLogPath);
 
@@ -131,12 +138,12 @@ public static class Program
         {
             if (!w2n && !n2w)
             {
-                Console.Error.WriteLine("Mode dossier : préciser -w2n ou -n2w.");
+                Console.Error.WriteLine("Folder mode: specify -w2n or -n2w.");
                 return 1;
             }
             if (dest is null)
             {
-                Console.Error.WriteLine("Mode dossier : destination requise.");
+                Console.Error.WriteLine("Folder mode: destination required.");
                 return 1;
             }
 
@@ -155,7 +162,7 @@ public static class Program
         }
         else
         {
-            Console.Error.WriteLine($"Source introuvable : {source}");
+            Console.Error.WriteLine($"Source not found: {source}");
             return 1;
         }
 
@@ -168,7 +175,7 @@ public static class Program
         string actualListPath = listFile.StartsWith("@") ? listFile[1..] : listFile;
         if (!File.Exists(actualListPath))
         {
-            Console.Error.WriteLine($"Fichier de liste introuvable : {actualListPath}");
+            Console.Error.WriteLine($"List file not found: {actualListPath}");
             return;
         }
 
@@ -208,17 +215,17 @@ public static class Program
 
         foreach (var file in files)
         {
-            Console.WriteLine($"--- Test bypass : {file} ---");
+            Console.WriteLine($"--- Bypass test: {file} ---");
             try
             {
                 var result = BypassRunner.Run(file, signatures, testDir);
-                Console.WriteLine($"  Signature      : {result.SignatureHex}");
-                Console.WriteLine($"  Score confiance: {result.ConfidenceScore:P0}");
-                Console.WriteLine($"  WAV de test    : {result.TestWavPath}");
+                Console.WriteLine($"  Signature       : {result.SignatureHex}");
+                Console.WriteLine($"  Confidence score: {result.ConfidenceScore:P0}");
+                Console.WriteLine($"  Test WAV        : {result.TestWavPath}");
 
                 if (result.Warnings.Count > 0)
                 {
-                    Console.WriteLine("  Avertissements :");
+                    Console.WriteLine("  Warnings:");
                     foreach (var w in result.Warnings)
                     {
                         Console.WriteLine($"    - {w}");
@@ -226,14 +233,14 @@ public static class Program
                 }
                 else
                 {
-                    Console.WriteLine("  Aucun avertissement, décodage plausible.");
+                    Console.WriteLine("  No warnings, plausible decoding.");
                 }
 
-                Console.WriteLine("  => Écoutez ce WAV, puis lancez --learn-signature si valide.");
+                Console.WriteLine("  => Listen to this WAV, then run --learn-signature if valid.");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"  ECHEC test bypass : {ex.Message}");
+                Console.WriteLine($"  BYPASS TEST FAILED: {ex.Message}");
             }
             Console.WriteLine();
         }

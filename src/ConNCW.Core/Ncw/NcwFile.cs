@@ -11,6 +11,12 @@ namespace ConNCW.Core.Ncw;
 /// - Signature comparée en bloc entier via SignatureStore (fix du bug octet-par-octet).
 /// - Mode bypassSignature pour forcer le décodage et tester la plausibilité du résultat.
 /// - BitReader/BitWriter remplacent les manipulations de pointeurs bruts.
+///
+/// AJOUT : ReadHeaderOnly() / ReadHeaderCore() pour permettre un inventaire rapide
+/// (channels, bits, sample rate, nombre d'échantillons) sans décoder les blocs audio.
+/// Utile pour scanner de grosses librairies avant une opération de suppression de
+/// samples manquants, afin de conserver les métadonnées nécessaires à la
+/// reconstruction de fichiers "dummy" corrects (mono/stéréo notamment).
 /// </summary>
 public sealed class NcwFile
 {
@@ -25,11 +31,33 @@ public sealed class NcwFile
         Samples = samples;
     }
 
-    public static NcwFile Open(string path, SignatureStore signatures, bool bypassSignature = false)
+    /// <summary>
+    /// Lit uniquement le header fixe (120 octets : signature + channels + bits + sampleRate
+    /// + numSamples + tableOffset + dataOffset + dataSize + someData). Ne seek jamais vers
+    /// la table d'offsets et ne décode aucun bloc audio. Conçu pour être rapide sur de très
+    /// grands volumes de fichiers (scan d'inventaire).
+    /// </summary>
+    public static NcwHeader ReadHeaderOnly(string path, SignatureStore signatures, bool bypassSignature = true)
     {
         using var stream = File.OpenRead(path);
         using var reader = new BinaryReader(stream);
 
+        var header = ReadHeaderCore(reader, signatures, bypassSignature);
+
+        if (bypassSignature && !header.ToAudioFormat().IsPlausible())
+        {
+            throw new InvalidDataException("Header NCW incohérent (mode bypass) : channels/bits/samplerate implausibles.");
+        }
+
+        return header;
+    }
+
+    /// <summary>
+    /// Lecture bas niveau du header fixe. Partagée entre Open() et ReadHeaderOnly() pour
+    /// éviter toute divergence entre le chemin "décodage complet" et le chemin "inventaire".
+    /// </summary>
+    private static NcwHeader ReadHeaderCore(BinaryReader reader, SignatureStore signatures, bool bypassSignature)
+    {
         var signature = reader.ReadBytes(8);
         ushort channels = reader.ReadUInt16();
         ushort bits = reader.ReadUInt16();
@@ -46,7 +74,7 @@ public sealed class NcwFile
             throw new UnknownNcwSignatureException(signature);
         }
 
-        var header = new NcwHeader
+        return new NcwHeader
         {
             RawSignature = signature,
             Channels = channels,
@@ -59,6 +87,14 @@ public sealed class NcwFile
             SomeData = someData,
             MatchedSignatureLabel = match?.Label
         };
+    }
+
+    public static NcwFile Open(string path, SignatureStore signatures, bool bypassSignature = false)
+    {
+        using var stream = File.OpenRead(path);
+        using var reader = new BinaryReader(stream);
+
+        var header = ReadHeaderCore(reader, signatures, bypassSignature);
 
         if (bypassSignature)
         {
@@ -133,12 +169,12 @@ public sealed class NcwFile
                         samples[frameCursor * channels + c] = channelBuffers[c][k];
                     }
                 }
-                frameCursor++;
-            }
 
-            if (frameCursor >= totalFrames)
-            {
-                break;
+                frameCursor++;
+                if (frameCursor >= totalFrames)
+                {
+                    break;
+                }
             }
         }
 
@@ -164,8 +200,8 @@ public sealed class NcwFile
     }
 
     /// <summary>
-    /// Décode un bloc (delta-decoding si bits > 0, valeurs absolues si bits < 0 ou = 0
-    /// en tolérant les deux conventions rencontrées dans des NCW réels).
+    /// Décode un bloc (delta-decoding si bits > 0, valeurs absolues si bits &lt;= 0)
+    /// en tolérant les deux conventions rencontrées dans des NCW réels.
     /// </summary>
     private static void DecodeBlockSamples(byte[] blockBytes, int effBits, NcwBlockHeader blockHeader, int[] output)
     {
@@ -245,6 +281,7 @@ public sealed class NcwFile
                 cursor += (uint)full.Length;
             }
         }
+
         blockOffsets.Add(cursor);
 
         using var stream = File.Create(path);
@@ -289,6 +326,7 @@ public sealed class NcwFile
             if (d < min) min = d;
             if (d > max) max = d;
         }
+
         if (min == int.MaxValue) { min = 0; max = 0; }
 
         int neededBits = MinBitsForRange(min, max);
@@ -345,15 +383,15 @@ public sealed class NcwFile
         }
         return 32;
     }
-}
 
-public sealed class UnknownNcwSignatureException : Exception
-{
-    public byte[] Signature { get; }
-
-    public UnknownNcwSignatureException(byte[] signature)
-        : base($"Signature NCW inconnue: {Convert.ToHexString(signature)}")
+    public sealed class UnknownNcwSignatureException : Exception
     {
-        Signature = signature;
+        public byte[] Signature { get; }
+
+        public UnknownNcwSignatureException(byte[] signature)
+            : base($"Signature NCW inconnue: {Convert.ToHexString(signature)}")
+        {
+            Signature = signature;
+        }
     }
 }

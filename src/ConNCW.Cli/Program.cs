@@ -2,21 +2,21 @@ using System.CommandLine;
 using ConNCW.Core.Bypass;
 using ConNCW.Core.Engine;
 using ConNCW.Core.Logging;
+using ConNCW.Core.Ncw;
 using ConNCW.Core.Signatures;
 
-
 namespace ConNCW.Cli;
-
 
 /// <summary>
 /// conNCW-NG CLI, port of conNCW / main.inc.
 /// Syntax parity with the original: -w2n, -n2w, -r, -rw, -l, -whs/-whe/-wha,
-/// plus new flags --learn-signature and --bypass-signature.
+/// plus new flags --learn-signature, --bypass-signature and --inventory.
 /// </summary>
 public static class Program
 {
     public static int Main(string[] args)
-    {   args = CommandLineFix.GetCorrectedArgs();
+    {
+        args = CommandLineFix.GetCorrectedArgs();
         string exeDir = AppContext.BaseDirectory;
         string signaturesPath = Path.Combine(exeDir, "Signatures", "signatures.json");
         if (!File.Exists(signaturesPath))
@@ -40,14 +40,27 @@ public static class Program
         var learnOption = new Option<string?>("--learn-signature") { Description = "Analyzes an NCW file and offers to add its signature to signatures.json" };
         var labelOption = new Option<string?>("--label") { Description = "Label to associate with the learned signature" };
 
+        // --- Nouveau : mode inventaire (header-only, aucun décodage audio) ---
+        var inventoryOption = new Option<bool>("--inventory")
+        {
+            Description = "Scan a folder of .ncw files and export a CSV inventory (channels, bits, sample rate, sample count, duration) without decoding audio. Fast, header-only scan. Use with 'source' as the root folder and --output for the CSV path."
+        };
+        var outputOption = new Option<string?>("--output")
+        {
+            Description = "CSV output path for --inventory mode (default: ncw_inventory_<timestamp>.csv)"
+        };
 
-        foreach (var opt in new Option[] { w2nOption, n2wOption, recOption, rewriteOption, listOption, whsOption, wheOption, whaOption, bypassOption, logOption, learnOption, labelOption })
+        foreach (var opt in new Option[]
+        {
+            w2nOption, n2wOption, recOption, rewriteOption, listOption, whsOption, wheOption, whaOption,
+            bypassOption, logOption, learnOption, labelOption, inventoryOption, outputOption
+        })
         {
             rootCommand.Add(opt);
         }
+
         rootCommand.Add(sourceArg);
         rootCommand.Add(destArg);
-
 
         rootCommand.SetAction(parseResult =>
         {
@@ -55,6 +68,16 @@ public static class Program
             if (learnPath is not null)
             {
                 return RunLearnSignature(learnPath, parseResult.GetValue(labelOption), signaturesPath);
+            }
+
+            // --- Nouveau : interception du mode inventaire avant le flux de conversion normal ---
+            bool inventory = parseResult.GetValue(inventoryOption);
+            if (inventory)
+            {
+                string inventorySource = parseResult.GetValue(sourceArg)!;
+                string outputCsv = parseResult.GetValue(outputOption)
+                    ?? $"ncw_inventory_{DateTime.Now:yyyyMMdd_HHmmss}.csv";
+                return RunInventory(inventorySource, outputCsv, signaturesPath);
             }
 
             string source = parseResult.GetValue(sourceArg)!;
@@ -70,8 +93,30 @@ public static class Program
             return RunConversion(source, dest, w2n, n2w, recursive, rewrite, listFile, bypass, logPath, signaturesPath);
         });
 
-
         return rootCommand.Parse(args).Invoke();
+    }
+
+    // --- Nouveau : point d'entrée du mode inventaire ---
+    private static int RunInventory(string source, string outputCsv, string signaturesPath)
+    {
+        if (!Directory.Exists(source))
+        {
+            Console.Error.WriteLine($"--inventory requires 'source' to be an existing folder: {source}");
+            return 1;
+        }
+
+        var signatures = new SignatureStore(signaturesPath);
+
+        try
+        {
+            NcwInventoryCommand.Run(source, outputCsv, signatures);
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Inventory failed: {ex.Message}");
+            return 1;
+        }
     }
 
     private static int RunLearnSignature(string ncwPath, string? label, string signaturesPath)
@@ -82,7 +127,6 @@ public static class Program
             return 1;
         }
 
-
         var preview = SignatureLearner.PreviewSignature(ncwPath);
         Console.WriteLine($"Detected signature: {preview.HexBytes}");
         Console.WriteLine();
@@ -90,7 +134,6 @@ public static class Program
         Console.WriteLine("(in Kontakt, or via --bypass-signature + listening to the test WAV)?");
         Console.Write($"Add this signature to signatures.json? [y/N] ");
         var answer = Console.ReadLine();
-
 
         if (!string.Equals(answer?.Trim(), "y", StringComparison.OrdinalIgnoreCase))
         {
@@ -102,10 +145,8 @@ public static class Program
             ? $"learned-{DateTime.Now:yyyyMMdd-HHmmss}"
             : label!;
 
-
         var store = new SignatureStore(signaturesPath);
         SignatureLearner.Confirm(store, preview.SignatureBytes, finalLabel, $"Learned from {Path.GetFileName(ncwPath)}");
-
 
         Console.WriteLine($"Signature added with label \"{finalLabel}\".");
         return 0;
@@ -117,7 +158,6 @@ public static class Program
     {
         var signatures = new SignatureStore(signaturesPath);
         string effectiveLogPath = logPath ?? $"conncw_{DateTime.Now:yyyyMMdd_HHmmss}.log";
-
 
         using var logger = new ConversionLogger(effectiveLogPath);
 
@@ -141,6 +181,7 @@ public static class Program
                 Console.Error.WriteLine("Folder mode: specify -w2n or -n2w.");
                 return 1;
             }
+
             if (dest is null)
             {
                 Console.Error.WriteLine("Folder mode: destination required.");
@@ -228,7 +269,7 @@ public static class Program
                     Console.WriteLine("  Warnings:");
                     foreach (var w in result.Warnings)
                     {
-                        Console.WriteLine($"    - {w}");
+                        Console.WriteLine($"   - {w}");
                     }
                 }
                 else
@@ -242,6 +283,7 @@ public static class Program
             {
                 Console.WriteLine($"  BYPASS TEST FAILED: {ex.Message}");
             }
+
             Console.WriteLine();
         }
     }

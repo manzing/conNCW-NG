@@ -40,7 +40,7 @@ public sealed class BitReader
     {
         if (BitsRemaining < bitCount)
         {
-            throw new InvalidOperationException("Fin de buffer atteinte pendant le décodage des bits.");
+            throw new InvalidDataException("Données corrompues : fin de buffer atteinte pendant le décodage des bits.");
         }
 
         uint result = 0;

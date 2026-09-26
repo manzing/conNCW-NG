@@ -79,6 +79,20 @@ public sealed class ConversionEngine
                 Message = ex.Message
             });
         }
+        catch (Exception ex)
+        {
+            if (File.Exists(destPath))
+            {
+                try { File.Delete(destPath); } catch { /* ignorer */ }
+            }
+
+            _logger.Report(new ConversionResult
+            {
+                SourcePath = sourcePath,
+                Status = ConversionStatus.FailCorruptData,
+                Message = $"Erreur inattendue : {ex.Message}"
+            });
+        }
     }
 
     private void ConvertNcwToWav(string sourcePath, string destPath, ConversionOptions options)

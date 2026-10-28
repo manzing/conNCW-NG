@@ -2,14 +2,14 @@ name: Build
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: [ "main", "master", "feature/**" ]
     tags: [ "v*" ]
   pull_request:
-    branches: [ "main", "master" ]
+    branches: [ "main", "master", "feature/**" ]
   workflow_dispatch:
 
 env:
-  DOTNET_VERSION: "10.0.x"
+  DOTNET_VERSION: "8.0.x"
   CONFIGURATION: Release
   PLATFORM: x64
 
@@ -33,9 +33,8 @@ jobs:
       - name: Build
         run: dotnet build conNCW-NG.sln -c ${{ env.CONFIGURATION }} -p:Platform=${{ env.PLATFORM }} --no-restore
 
-      - name: Run tests (si présents)
+      - name: Run tests
         run: dotnet test conNCW-NG.sln -c ${{ env.CONFIGURATION }} -p:Platform=${{ env.PLATFORM }} --no-build --verbosity normal
-        continue-on-error: true
 
       - name: Publish CLI (framework-dependent)
         run: >

@@ -20,6 +20,12 @@ public sealed class SignatureStore
         Load();
     }
 
+    public SignatureStore(IEnumerable<SignatureEntry> entries)
+    {
+        _path = string.Empty;
+        _entries.AddRange(entries);
+    }
+
     public void Load()
     {
         _entries.Clear();

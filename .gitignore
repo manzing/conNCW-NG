@@ -1,0 +1,14 @@
+# AI backup and metadata
+.ai/
+
+# Build results
+[Bb]in/
+[Oo]bj/
+
+# Visual Studio / Rider / VS Code cache
+.vs/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates

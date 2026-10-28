@@ -10,13 +10,9 @@ namespace ConNCW.Core.Ncw;
 /// Corrections apportées par rapport à l'original :
 /// - Signature comparée en bloc entier via SignatureStore (fix du bug octet-par-octet).
 /// - Mode bypassSignature pour forcer le décodage et tester la plausibilité du résultat.
-/// - BitReader/BitWriter remplacent les manipulations de pointeurs bruts.
-///
-/// AJOUT : ReadHeaderOnly() / ReadHeaderCore() pour permettre un inventaire rapide
-/// (channels, bits, sample rate, nombre d'échantillons) sans décoder les blocs audio.
-/// Utile pour scanner de grosses librairies avant une opération de suppression de
-/// samples manquants, afin de conserver les métadonnées nécessaires à la
-/// reconstruction de fichiers "dummy" corrects (mono/stéréo notamment).
+/// - BitReader/BitWriter optimisés remplaçant les manipulations de pointeurs bruts.
+/// - Validation stricte de la table d'offsets, de la sentinelle et des bornes de fichiers.
+/// - Conformité FORMAT.md : gestion rigoureuse du 512e delta, du padding répété et du Mid/Side (canal 0).
 /// </summary>
 public sealed class NcwFile
 {
@@ -33,7 +29,7 @@ public sealed class NcwFile
 
     /// <summary>
     /// Lit uniquement le header fixe (120 octets : signature + channels + bits + sampleRate
-    /// + numSamples + tableOffset + dataOffset + dataSize + someData). Ne seek jamais vers
+    /// + numSamples + tableOffset + dataOffset + dataSize + sampleFormatWord + someData). Ne seek jamais vers
     /// la table d'offsets et ne décode aucun bloc audio. Conçu pour être rapide sur de très
     /// grands volumes de fichiers (scan d'inventaire).
     /// </summary>
@@ -58,6 +54,11 @@ public sealed class NcwFile
     /// </summary>
     private static NcwHeader ReadHeaderCore(BinaryReader reader, SignatureStore signatures, bool bypassSignature)
     {
+        if (reader.BaseStream.Length < NcwHeader.HeaderSize)
+        {
+            throw new InvalidDataException("Fichier NCW tronqué : taille inférieure à l'en-tête minimal de 120 octets.");
+        }
+
         var signature = reader.ReadBytes(8);
         ushort channels = reader.ReadUInt16();
         ushort bits = reader.ReadUInt16();
@@ -66,7 +67,8 @@ public sealed class NcwFile
         uint tableOffset = reader.ReadUInt32();
         uint dataOffset = reader.ReadUInt32();
         uint dataSize = reader.ReadUInt32();
-        byte[] someData = reader.ReadBytes(88);
+        uint sampleFormatWord = reader.ReadUInt32();
+        byte[] someData = reader.ReadBytes(84);
 
         var match = signatures.Match(signature);
         if (match is null && !bypassSignature)
@@ -84,6 +86,7 @@ public sealed class NcwFile
             TableOffset = tableOffset,
             DataOffset = dataOffset,
             DataSize = dataSize,
+            SampleFormatWord = sampleFormatWord,
             SomeData = someData,
             MatchedSignatureLabel = match?.Label
         };
@@ -105,13 +108,44 @@ public sealed class NcwFile
             }
         }
 
+        if (header.TableOffset != NcwHeader.HeaderSize)
+        {
+            throw new InvalidDataException($"Offset de table NCW invalide : {header.TableOffset} (attendu : {NcwHeader.HeaderSize}).");
+        }
+
         int blockCount = header.BlockCount;
+        long expectedTableBytes = (long)(blockCount + 1) * 4;
+        if ((long)header.TableOffset + expectedTableBytes > stream.Length)
+        {
+            throw new InvalidDataException("Fichier NCW tronqué : impossible de lire la table d'offsets complète.");
+        }
+
         stream.Seek(header.TableOffset, SeekOrigin.Begin);
         var offsets = new uint[blockCount + 1];
         for (int i = 0; i < offsets.Length; i++)
         {
             offsets[i] = reader.ReadUInt32();
+            if (i > 0 && offsets[i] <= offsets[i - 1])
+            {
+                throw new InvalidDataException($"Table d'offsets NCW corrompue : l'offset du bloc {i} ({offsets[i]}) n'est pas strictement supérieur au précédent ({offsets[i - 1]}).");
+            }
         }
+
+        if (blockCount > 0 && offsets[0] != 0)
+        {
+            throw new InvalidDataException($"Table d'offsets NCW invalide : le premier offset de bloc doit valoir 0 (obtenu : {offsets[0]}).");
+        }
+
+        if (blockCount > 0 && offsets[blockCount] != header.DataSize)
+        {
+            throw new InvalidDataException($"Sentinelle NCW invalide : l'offset sentinelle ({offsets[blockCount]}) ne correspond pas à DataSize ({header.DataSize}).");
+        }
+
+        if ((long)header.DataOffset + header.DataSize > stream.Length)
+        {
+            throw new InvalidDataException("Les données audio déclarées dans le header NCW dépassent la fin physique du fichier.");
+        }
+
         header.BlockOffsets = offsets;
 
         var samples = DecodeBlocks(stream, reader, header);
@@ -143,10 +177,19 @@ public sealed class NcwFile
             for (int c = 0; c < channels; c++)
             {
                 var blockHeader = ReadBlockHeader(reader);
-                midSide = blockHeader.IsMidSide;
+                if (c == 0)
+                {
+                    // Conforme à la spécification Kontakt : seul le sous-bloc 0 (canal 0) détermine le mode Mid/Side
+                    midSide = blockHeader.IsMidSide && channels == 2;
+                }
+
                 int effBits = blockHeader.EffectiveBits(header.Bits);
                 int byteLen = effBits * 64;
                 var blockBytes = reader.ReadBytes(byteLen);
+                if (blockBytes.Length < byteLen)
+                {
+                    throw new InvalidDataException($"Données de bloc NCW incomplètes au bloc {b}, canal {c} : attendu {byteLen} octets, obtenu {blockBytes.Length}.");
+                }
 
                 DecodeBlockSamples(blockBytes, effBits, blockHeader, channelBuffers[c]);
             }
@@ -159,8 +202,8 @@ public sealed class NcwFile
                 {
                     int mid = channelBuffers[0][k];
                     int side = channelBuffers[1][k];
-                    samples[frameCursor * 2] = mid + side;
-                    samples[frameCursor * 2 + 1] = mid - side;
+                    samples[frameCursor * 2] = unchecked(mid + side);
+                    samples[frameCursor * 2 + 1] = unchecked(mid - side);
                 }
                 else
                 {
@@ -184,6 +227,15 @@ public sealed class NcwFile
     private static NcwBlockHeader ReadBlockHeader(BinaryReader reader)
     {
         var sig = reader.ReadBytes(4);
+        if (sig.Length < 4 ||
+            sig[0] != NcwHeader.BlockSignature[0] ||
+            sig[1] != NcwHeader.BlockSignature[1] ||
+            sig[2] != NcwHeader.BlockSignature[2] ||
+            sig[3] != NcwHeader.BlockSignature[3])
+        {
+            throw new InvalidDataException($"Signature de bloc NCW invalide (obtenu {Convert.ToHexString(sig)}, attendu 160C9A3E).");
+        }
+
         int baseValue = reader.ReadInt32();
         short bits = reader.ReadInt16();
         ushort flags = reader.ReadUInt16();
@@ -201,7 +253,7 @@ public sealed class NcwFile
 
     /// <summary>
     /// Décode un bloc (delta-decoding si bits > 0, valeurs absolues si bits &lt;= 0)
-    /// en tolérant les deux conventions rencontrées dans des NCW réels.
+    /// en consommant le 512e delta requis par la spécification NCW.
     /// </summary>
     private static void DecodeBlockSamples(byte[] blockBytes, int effBits, NcwBlockHeader blockHeader, int[] output)
     {
@@ -217,6 +269,12 @@ public sealed class NcwFile
                 int diff = bitReader.ReadSignedBits(effBits);
                 current += diff;
                 output[i] = current;
+            }
+
+            // Consommation du 512e delta requis par la spécification NCW (résultat non émis)
+            if (bitReader.BitsRemaining >= effBits)
+            {
+                _ = bitReader.ReadSignedBits(effBits);
             }
         }
         else
@@ -242,7 +300,8 @@ public sealed class NcwFile
             SampleRate = format.SampleRate,
             NumSamples = format.SampleCount,
             TableOffset = NcwHeader.HeaderSize,
-            SomeData = new byte[88]
+            SampleFormatWord = 0,
+            SomeData = new byte[84]
         };
         return new NcwFile(header, interleavedSamples);
     }
@@ -266,10 +325,15 @@ public sealed class NcwFile
 
             for (int c = 0; c < channels; c++)
             {
+                int lastSample = samplesInBlock > 0
+                    ? Samples[(b * NcwHeader.BlockSampleCount + samplesInBlock - 1) * channels + c]
+                    : 0;
+
                 for (int k = 0; k < NcwHeader.BlockSampleCount; k++)
                 {
                     int frameIdx = b * NcwHeader.BlockSampleCount + k;
-                    channelBuffer[k] = frameIdx < totalFrames ? Samples[frameIdx * channels + c] : 0;
+                    // Conforme à la spec : le padding répète le dernier échantillon valide pour éviter les deltas parasites
+                    channelBuffer[k] = frameIdx < totalFrames ? Samples[frameIdx * channels + c] : lastSample;
                 }
 
                 var (payload, blockHeaderBytes) = EncodeChannelBlock(channelBuffer, samplesInBlock, Header.Bits);
@@ -299,7 +363,8 @@ public sealed class NcwFile
         writer.Write(tableOffset);
         writer.Write(dataOffset);
         writer.Write(dataSize);
-        writer.Write(new byte[88]);
+        writer.Write(Header.SampleFormatWord);
+        writer.Write(Header.SomeData.Length == 84 ? Header.SomeData : new byte[84]);
 
         foreach (var off in blockOffsets)
         {
@@ -319,9 +384,7 @@ public sealed class NcwFile
         diffs[0] = 0;
         for (int i = 1; i < NcwHeader.BlockSampleCount; i++)
         {
-            int a = i < validCount ? samples[i] : 0;
-            int prev = (i - 1) < validCount ? samples[i - 1] : 0;
-            int d = a - prev;
+            int d = samples[i] - samples[i - 1];
             diffs[i] = d;
             if (d < min) min = d;
             if (d > max) max = d;
@@ -333,20 +396,21 @@ public sealed class NcwFile
         bool useEncoded = neededBits < bitsPerSample;
         int effBits = useEncoded ? neededBits : bitsPerSample;
 
-        var bitWriter = new BitWriter();
+        var bitWriter = new BitWriter(effBits * 64);
         if (useEncoded)
         {
             for (int i = 1; i < NcwHeader.BlockSampleCount; i++)
             {
                 bitWriter.WriteSignedBits(diffs[i], effBits);
             }
+            // Conforme à la spec : 512e delta terminal égal à 0
+            bitWriter.WriteSignedBits(0, effBits);
         }
         else
         {
             for (int i = 0; i < NcwHeader.BlockSampleCount; i++)
             {
-                int v = i < validCount ? samples[i] : 0;
-                bitWriter.WriteSignedBits(v, effBits);
+                bitWriter.WriteSignedBits(samples[i], effBits);
             }
         }
 

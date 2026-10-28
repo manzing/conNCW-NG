@@ -10,6 +10,15 @@ public readonly struct NcwBlockHeader
     public uint Zero { get; init; }
 
     public bool IsUnencoded => Bits <= 0;
-    public int EffectiveBits(int headerBitsPerSample) => Bits == 0 ? headerBitsPerSample : Math.Abs(Bits);
-    public bool IsMidSide => Flags == 1;
+    public int EffectiveBits(int headerBitsPerSample)
+    {
+        if (Bits == 0)
+        {
+            return headerBitsPerSample;
+        }
+        int abs = Math.Abs((int)Bits);
+        return Math.Clamp(abs, 1, 32);
+    }
+    public bool IsMidSide => (Flags & 0x01) != 0;
+    public bool IsFloat => (Flags & 0x02) != 0;
 }

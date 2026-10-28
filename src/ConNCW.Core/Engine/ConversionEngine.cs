@@ -105,9 +105,16 @@ public sealed class ConversionEngine
         for (int i = 0; i < ncw.Samples.Length; i++)
         {
             int v = ncw.Samples[i];
-            for (int b = 0; b < bytesPerSample; b++)
+            if (format.BitsPerSample == 8)
             {
-                pcmBytes[i * bytesPerSample + b] = (byte)((v >> (8 * b)) & 0xFF);
+                pcmBytes[i] = unchecked((byte)(v + 128));
+            }
+            else
+            {
+                for (int b = 0; b < bytesPerSample; b++)
+                {
+                    pcmBytes[i * bytesPerSample + b] = (byte)((v >> (8 * b)) & 0xFF);
+                }
             }
         }
 
@@ -144,10 +151,19 @@ public sealed class ConversionEngine
             {
                 v |= wav.AudioData[i * bytesPerSample + b] << (8 * b);
             }
-            int signBit = 1 << (wav.Format.BitsPerSample - 1);
-            if ((v & signBit) != 0)
+
+            if (wav.Format.BitsPerSample == 8)
             {
-                v -= 1 << wav.Format.BitsPerSample;
+                // WAV 8-bit est non signé [0..255] centré sur 128 ; NCW utilise des entiers signés
+                v -= 128;
+            }
+            else if (wav.Format.BitsPerSample < 32)
+            {
+                int signBit = 1 << (wav.Format.BitsPerSample - 1);
+                if ((v & signBit) != 0)
+                {
+                    v -= 1 << wav.Format.BitsPerSample;
+                }
             }
             interleaved[i] = v;
         }

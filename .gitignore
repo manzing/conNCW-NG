@@ -12,3 +12,5 @@
 *.suo
 *.userosscache
 *.sln.docstates
+
+publish/

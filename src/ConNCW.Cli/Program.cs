@@ -3,6 +3,7 @@ using ConNCW.Core.Bypass;
 using ConNCW.Core.Engine;
 using ConNCW.Core.Logging;
 using ConNCW.Core.Ncw;
+using ConNCW.Core.Resampler;
 using ConNCW.Core.Signatures;
 
 namespace ConNCW.Cli;
@@ -10,7 +11,8 @@ namespace ConNCW.Cli;
 /// <summary>
 /// conNCW-NG CLI, port of conNCW / main.inc.
 /// Syntax parity with the original: -w2n, -n2w, -r, -rw, -l, -whs/-whe/-wha,
-/// plus new flags --learn-signature, --bypass-signature and --inventory.
+/// plus flags --learn-signature, --bypass-signature, --inventory,
+/// and native in-memory pipeline integration via resampler.dll (--resampler, -n2n, -sr, -b, --ns).
 /// </summary>
 public static class Program
 {
@@ -24,11 +26,16 @@ public static class Program
             signaturesPath = Path.Combine(exeDir, "signatures.json");
         }
 
-        var rootCommand = new RootCommand("conNCW - NCW <-> WAV conversion (C#/.NET 10 port)");
+        var rootCommand = new RootCommand("conNCW-NG - NCW <-> WAV conversion & in-memory resampling (.NET 8)");
         var sourceArg = new Argument<string>("source") { Description = "Source file or folder" };
         var destArg = new Argument<string?>("destination") { Description = "Destination file or folder", DefaultValueFactory = _ => null };
+
+        // Direction options
         var w2nOption = new Option<bool>("-w2n") { Description = "Convert WAV -> NCW (folder mode)" };
         var n2wOption = new Option<bool>("-n2w") { Description = "Convert NCW -> WAV (folder mode)" };
+        var n2nOption = new Option<bool>("-n2n") { Description = "Convert NCW -> NCW in RAM (pipeline mode)" };
+        var w2wOption = new Option<bool>("-w2w") { Description = "Convert WAV -> WAV in RAM" };
+
         var recOption = new Option<bool>("-r", "-rec") { Description = "Recursive processing of subdirectories" };
         var rewriteOption = new Option<bool>("-rw", "-rewrite") { Description = "Overwrite existing destination files" };
         var listOption = new Option<string?>("-l") { Description = "List mode: @conncwlist file" };
@@ -36,24 +43,37 @@ public static class Program
         var wheOption = new Option<bool>("-whe") { Description = "Extended WAV header" };
         var whaOption = new Option<bool>("-wha") { Description = "Auto WAV header" };
         var bypassOption = new Option<bool>("--bypass-signature") { Description = "Force NCW decoding while ignoring the signature (plausibility test)" };
-        var logOption = new Option<string?>("--log") { Description = "Log file path (default: conncw_<timestamp>.log)" };
+        var logOption = new Option<string?>("--log") { Description = "Log file path (default: conncw_<timestamp>.log, or NUL to suppress)" };
         var learnOption = new Option<string?>("--learn-signature") { Description = "Analyzes an NCW file and offers to add its signature to signatures.json" };
         var labelOption = new Option<string?>("--label") { Description = "Label to associate with the learned signature" };
 
-        // --- Nouveau : mode inventaire (header-only, aucun décodage audio) ---
+        // Mode inventaire (header-only, aucun décodage audio)
         var inventoryOption = new Option<bool>("--inventory")
         {
-            Description = "Scan a folder of .ncw files and export a CSV inventory (channels, bits, sample rate, sample count, duration) without decoding audio. Fast, header-only scan. Use with 'source' as the root folder and --output for the CSV path."
+            Description = "Scan a folder of .ncw files and export a CSV inventory without decoding audio. Fast header-only scan."
         };
         var outputOption = new Option<string?>("--output")
         {
             Description = "CSV output path for --inventory mode (default: ncw_inventory_<timestamp>.csv)"
         };
 
+        // ReSampler DLL options
+        var resampleOption = new Option<bool>("--resampler", "--resample") { Description = "Enable in-memory resampling via resampler.dll" };
+        var rateOption = new Option<int?>("-sr", "--rate", "--samplerate") { Description = "Target sample rate in Hz (default: 44100 when resampler is enabled)" };
+        var bitsOption = new Option<int?>("-b", "--bits", "--bit-depth") { Description = "Target bit depth (16, 24, 32; default: 16)" };
+        var nsOption = new Option<int?>("--ns", "--dither-profile") { Description = "Dither noise shaping profile ID (0=flat, 5=Lipshitz44k, 6=standard; default: 6)" };
+        var ditherAmountOption = new Option<double?>("--dither") { Description = "Dither amount (default: 1.0, 0 = disabled)" };
+        var doublePrecOption = new Option<bool?>("--doubleprecision") { Description = "Use double precision 64-bit float processing in ReSampler (default: true)" };
+        var mtOption = new Option<bool?>("--mt") { Description = "Multi-threaded audio channel processing per file (default: false)" };
+        var threadsOption = new Option<int?>("-t", "--threads") { Description = "Number of worker threads for parallel file processing (default: CPU core count)" };
+        var bypassLowDepthOption = new Option<bool>("--bypass-lowdepth", "--bypass-16bit") { Description = "Bypass resampling/re-encoding for samples already <= target bit depth (e.g. <= 16-bit, 8-bit)" };
+
         foreach (var opt in new Option[]
         {
-            w2nOption, n2wOption, recOption, rewriteOption, listOption, whsOption, wheOption, whaOption,
-            bypassOption, logOption, learnOption, labelOption, inventoryOption, outputOption
+            w2nOption, n2wOption, n2nOption, w2wOption, recOption, rewriteOption, listOption,
+            whsOption, wheOption, whaOption, bypassOption, logOption, learnOption, labelOption,
+            inventoryOption, outputOption, resampleOption, rateOption, bitsOption, nsOption,
+            ditherAmountOption, doublePrecOption, mtOption, threadsOption, bypassLowDepthOption
         })
         {
             rootCommand.Add(opt);
@@ -70,7 +90,6 @@ public static class Program
                 return RunLearnSignature(learnPath, parseResult.GetValue(labelOption), signaturesPath);
             }
 
-            // --- Nouveau : interception du mode inventaire avant le flux de conversion normal ---
             bool inventory = parseResult.GetValue(inventoryOption);
             if (inventory)
             {
@@ -84,19 +103,55 @@ public static class Program
             string? dest = parseResult.GetValue(destArg);
             bool w2n = parseResult.GetValue(w2nOption);
             bool n2w = parseResult.GetValue(n2wOption);
+            bool n2n = parseResult.GetValue(n2nOption);
+            bool w2w = parseResult.GetValue(w2wOption);
             bool recursive = parseResult.GetValue(recOption);
             bool rewrite = parseResult.GetValue(rewriteOption);
             string? listFile = parseResult.GetValue(listOption);
             bool bypass = parseResult.GetValue(bypassOption);
             string? logPath = parseResult.GetValue(logOption);
+            bool bypassLowDepth = parseResult.GetValue(bypassLowDepthOption);
 
-            return RunConversion(source, dest, w2n, n2w, recursive, rewrite, listFile, bypass, logPath, signaturesPath);
+            bool resample = parseResult.GetValue(resampleOption);
+            int? rate = parseResult.GetValue(rateOption);
+            int? bits = parseResult.GetValue(bitsOption);
+            int? ns = parseResult.GetValue(nsOption);
+            double? dither = parseResult.GetValue(ditherAmountOption);
+            bool? doublePrec = parseResult.GetValue(doublePrecOption);
+            bool? mt = parseResult.GetValue(mtOption);
+            int? threads = parseResult.GetValue(threadsOption);
+
+            ResampleOptions? resampleOptions = null;
+            if (resample || rate.HasValue || bits.HasValue || ns.HasValue)
+            {
+                if (!NativeReSampler.IsAvailable)
+                {
+                    Console.Error.WriteLine("Error: 'resampler.dll' (or dependencies 'sndfile.dll' / 'libfftw3-3.dll') is required for resampling but could not be loaded.");
+                    return 1;
+                }
+
+                resampleOptions = new ResampleOptions
+                {
+                    TargetSampleRate = rate ?? 0, // 0 = preserve source sample rate
+                    TargetBits = bits ?? 16,
+                    DitherProfile = ns ?? 6,
+                    DitherAmount = dither ?? 1.0,
+                    DoublePrecision = doublePrec ?? true,
+                    MultiThreadedChannels = mt ?? false,
+                    WorkerThreads = threads ?? 0
+                };
+            }
+
+            return RunConversion(
+                source, dest, w2n, n2w, n2n, w2w, recursive, rewrite,
+                listFile, bypass, logPath, signaturesPath, resampleOptions,
+                bypassLowDepth
+            );
         });
 
         return rootCommand.Parse(args).Invoke();
     }
 
-    // --- Nouveau : point d'entrée du mode inventaire ---
     private static int RunInventory(string source, string outputCsv, string signaturesPath)
     {
         if (!Directory.Exists(source))
@@ -132,7 +187,7 @@ public static class Program
         Console.WriteLine();
         Console.WriteLine("Have you verified that this file loads correctly");
         Console.WriteLine("(in Kontakt, or via --bypass-signature + listening to the test WAV)?");
-        Console.Write($"Add this signature to signatures.json? [y/N] ");
+        Console.Write("Add this signature to signatures.json? [y/N] ");
         var answer = Console.ReadLine();
 
         if (!string.Equals(answer?.Trim(), "y", StringComparison.OrdinalIgnoreCase))
@@ -153,8 +208,9 @@ public static class Program
     }
 
     private static int RunConversion(
-        string source, string? dest, bool w2n, bool n2w, bool recursive, bool rewrite,
-        string? listFile, bool bypass, string? logPath, string signaturesPath)
+        string source, string? dest, bool w2n, bool n2w, bool n2n, bool w2w, bool recursive, bool rewrite,
+        string? listFile, bool bypass, string? logPath, string signaturesPath, ResampleOptions? resampleOptions,
+        bool bypassLowDepth)
     {
         var signatures = new SignatureStore(signaturesPath);
         string effectiveLogPath = logPath ?? $"conncw_{DateTime.Now:yyyyMMdd_HHmmss}.log";
@@ -172,33 +228,108 @@ public static class Program
 
         if (listFile is not null)
         {
-            RunListMode(listFile, engine, recursive, rewrite);
+            RunListMode(listFile, engine, recursive, rewrite, resampleOptions, bypassLowDepth);
         }
         else if (Directory.Exists(source))
         {
-            if (!w2n && !n2w)
+            ConversionDirection direction;
+
+            if (n2n)
             {
-                Console.Error.WriteLine("Folder mode: specify -w2n or -n2w.");
+                direction = ConversionDirection.NcwToNcw;
+            }
+            else if (w2w)
+            {
+                direction = ConversionDirection.WavToWav;
+            }
+            else if (n2w)
+            {
+                direction = ConversionDirection.NcwToWav;
+            }
+            else if (w2n)
+            {
+                direction = ConversionDirection.WavToNcw;
+            }
+            else if (resampleOptions != null)
+            {
+                // Auto-detect direction in resample mode if not explicitly stated
+                var hasNcw = Directory.EnumerateFiles(source, "*.ncw", recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly).Any();
+                direction = hasNcw ? ConversionDirection.NcwToNcw : ConversionDirection.WavToNcw;
+            }
+            else
+            {
+                Console.Error.WriteLine("Folder mode: specify conversion direction (-w2n, -n2w, -n2n, or --resampler).");
                 return 1;
             }
 
-            if (dest is null)
-            {
-                Console.Error.WriteLine("Folder mode: destination required.");
-                return 1;
-            }
+            dest ??= source; // in-place if destination omitted in resample/n2n mode
 
-            var direction = n2w ? ConversionDirection.NcwToWav : ConversionDirection.WavToNcw;
-            var options = new ConversionOptions { Direction = direction, Recursive = recursive, Rewrite = rewrite };
+            var options = new ConversionOptions
+            {
+                Direction = direction,
+                Recursive = recursive,
+                Rewrite = rewrite,
+                Resample = resampleOptions,
+                BypassLowDepth = bypassLowDepth
+            };
+
             engine.ConvertDirectory(source, dest, options);
         }
         else if (File.Exists(source))
         {
             string ext = Path.GetExtension(source).ToLowerInvariant();
-            var direction = ext == ".ncw" ? ConversionDirection.NcwToWav : ConversionDirection.WavToNcw;
-            string destPath = dest ?? Path.ChangeExtension(source, direction == ConversionDirection.NcwToWav ? ".wav" : ".ncw");
+            ConversionDirection direction;
 
-            var options = new ConversionOptions { Direction = direction, Rewrite = rewrite };
+            if (n2n)
+            {
+                direction = ConversionDirection.NcwToNcw;
+            }
+            else if (w2w)
+            {
+                direction = ConversionDirection.WavToWav;
+            }
+            else if (n2w)
+            {
+                direction = ConversionDirection.NcwToWav;
+            }
+            else if (w2n)
+            {
+                direction = ConversionDirection.WavToNcw;
+            }
+            else
+            {
+                string targetExt = dest != null ? Path.GetExtension(dest).ToLowerInvariant() : string.Empty;
+                if (ext == ".ncw")
+                {
+                    direction = (targetExt == ".ncw" || resampleOptions != null && string.IsNullOrEmpty(targetExt))
+                        ? ConversionDirection.NcwToNcw
+                        : ConversionDirection.NcwToWav;
+                }
+                else
+                {
+                    direction = (targetExt == ".wav")
+                        ? ConversionDirection.WavToWav
+                        : ConversionDirection.WavToNcw;
+                }
+            }
+
+            string outExt = direction switch
+            {
+                ConversionDirection.NcwToWav => ".wav",
+                ConversionDirection.WavToWav => ".wav",
+                _ => ".ncw"
+            };
+
+            string destPath = dest ?? (direction == ConversionDirection.NcwToNcw ? source : Path.ChangeExtension(source, outExt));
+
+            var options = new ConversionOptions
+            {
+                Direction = direction,
+                Rewrite = rewrite,
+                Resample = resampleOptions,
+                BypassLowDepth = bypassLowDepth
+            };
+
             engine.ConvertFile(source, destPath, options);
         }
         else
@@ -211,7 +342,7 @@ public static class Program
         return 0;
     }
 
-    private static void RunListMode(string listFile, ConversionEngine engine, bool recursive, bool rewrite)
+    private static void RunListMode(string listFile, ConversionEngine engine, bool recursive, bool rewrite, ResampleOptions? resampleOptions, bool bypassLowDepth)
     {
         string actualListPath = listFile.StartsWith("@") ? listFile[1..] : listFile;
         if (!File.Exists(actualListPath))
@@ -238,10 +369,24 @@ public static class Program
             }
 
             string ext = Path.GetExtension(src).ToLowerInvariant();
-            var direction = ext == ".ncw" ? ConversionDirection.NcwToWav : ConversionDirection.WavToNcw;
-            string destPath = dst ?? Path.ChangeExtension(src, direction == ConversionDirection.NcwToWav ? ".wav" : ".ncw");
+            var direction = ext == ".ncw"
+                ? (resampleOptions != null && dst != null && Path.GetExtension(dst).Equals(".ncw", StringComparison.OrdinalIgnoreCase)
+                    ? ConversionDirection.NcwToNcw
+                    : ConversionDirection.NcwToWav)
+                : ConversionDirection.WavToNcw;
 
-            var options = new ConversionOptions { Direction = direction, Recursive = recursive, Rewrite = rewrite };
+            string outExt = direction == ConversionDirection.NcwToWav ? ".wav" : ".ncw";
+            string destPath = dst ?? Path.ChangeExtension(src, outExt);
+
+            var options = new ConversionOptions
+            {
+                Direction = direction,
+                Recursive = recursive,
+                Rewrite = rewrite,
+                Resample = resampleOptions,
+                BypassLowDepth = bypassLowDepth
+            };
+
             engine.ConvertFile(src, destPath, options);
         }
     }

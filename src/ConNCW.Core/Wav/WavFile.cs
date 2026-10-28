@@ -1,4 +1,5 @@
 using ConNCW.Core.Models;
+using ConNCW.Core.Ncw;
 
 namespace ConNCW.Core.Wav;
 
@@ -24,10 +25,81 @@ public sealed class WavFile
         return new WavFile(format, pcmBytes);
     }
 
+    /// <summary>
+    /// Construit un WavFile à partir d'un fichier NcwFile décodé en mémoire.
+    /// </summary>
+    public static WavFile FromNcw(NcwFile ncw)
+    {
+        var format = ncw.Header.ToAudioFormat();
+        int bytesPerSample = format.BitsPerSample / 8;
+        var pcmBytes = new byte[ncw.Samples.Length * bytesPerSample];
+        for (int i = 0; i < ncw.Samples.Length; i++)
+        {
+            int v = ncw.Samples[i];
+            if (format.BitsPerSample == 8)
+            {
+                pcmBytes[i] = unchecked((byte)(v + 128));
+            }
+            else
+            {
+                for (int b = 0; b < bytesPerSample; b++)
+                {
+                    pcmBytes[i * bytesPerSample + b] = (byte)((v >> (8 * b)) & 0xFF);
+                }
+            }
+        }
+        return new WavFile(format, pcmBytes);
+    }
+
+    /// <summary>
+    /// Convertit les octets audio PCM en échantillons entiers entrelacés signés (int[]).
+    /// </summary>
+    public int[] GetInterleavedSamples()
+    {
+        int bytesPerSample = Format.BitsPerSample / 8;
+        int totalSamples = AudioData.Length / bytesPerSample;
+        var interleaved = new int[totalSamples];
+
+        for (int i = 0; i < totalSamples; i++)
+        {
+            int v = 0;
+            for (int b = 0; b < bytesPerSample; b++)
+            {
+                v |= AudioData[i * bytesPerSample + b] << (8 * b);
+            }
+
+            if (Format.BitsPerSample == 8)
+            {
+                v -= 128;
+            }
+            else if (Format.BitsPerSample < 32)
+            {
+                int signBit = 1 << (Format.BitsPerSample - 1);
+                if ((v & signBit) != 0)
+                {
+                    v -= 1 << Format.BitsPerSample;
+                }
+            }
+            interleaved[i] = v;
+        }
+        return interleaved;
+    }
+
     public static WavFile Open(string path)
     {
         using var stream = File.OpenRead(path);
-        using var reader = new BinaryReader(stream);
+        return Open(stream);
+    }
+
+    public static WavFile FromBytes(byte[] wavBytes)
+    {
+        using var stream = new MemoryStream(wavBytes);
+        return Open(stream);
+    }
+
+    public static WavFile Open(Stream stream)
+    {
+        using var reader = new BinaryReader(stream, System.Text.Encoding.ASCII, leaveOpen: true);
 
         var riffId = new string(reader.ReadChars(4));
         if (riffId != "RIFF")
@@ -80,7 +152,6 @@ public sealed class WavFile
             else
             {
                 // Chunk inconnu (LIST, JUNK, fact, PEAK, bext, ...) : on l'ignore proprement
-                // au lieu de faire échouer le parsing, contrairement au comportement original.
                 long skip = chunkSize + (chunkSize % 2); // padding pair RIFF
                 reader.ReadBytes((int)Math.Min(skip, stream.Length - stream.Position));
             }
@@ -109,7 +180,19 @@ public sealed class WavFile
     public void Save(string path)
     {
         using var stream = File.Create(path);
-        using var writer = new BinaryWriter(stream);
+        Save(stream);
+    }
+
+    public byte[] ToBytes()
+    {
+        using var stream = new MemoryStream(AudioData.Length + 44);
+        Save(stream);
+        return stream.ToArray();
+    }
+
+    public void Save(Stream stream)
+    {
+        using var writer = new BinaryWriter(stream, System.Text.Encoding.ASCII, leaveOpen: true);
 
         int byteRate = (int)(Format.SampleRate * Format.Channels * (Format.BitsPerSample / 8));
         short blockAlign = (short)(Format.Channels * (Format.BitsPerSample / 8));

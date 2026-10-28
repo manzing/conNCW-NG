@@ -1,7 +1,7 @@
-# conNCW-NG (C# / .NET 10 port)
+# conNCW-NG (C# / .NET 8 LTS port)
 
 Full port of the legacy Delphi software **conNCW** (NCW <-> WAV conversion,
-Native Instruments Kontakt) to .NET 10 LTS, x64, with robustness fixes.
+Native Instruments Kontakt) to .NET 8 LTS (forward-compatible with .NET 10+), x64, with robustness fixes.
 
 ## Status: in progress
 
@@ -77,6 +77,8 @@ src/
 ```
 
 ## Build
+
+Requires .NET 8.0 SDK or higher.
 
 ```
 dotnet build -c Release -p:Platform=x64

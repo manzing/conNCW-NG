@@ -398,4 +398,80 @@ public class ResamplerPipelineTests
             }
         }
     }
+
+    [Fact]
+    public void WavToWav_32BitFloat_ResamplesTo16Bit_WithoutDistortion()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "wav_float_test_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            string srcFile = Path.Combine(tempDir, "input_32f.wav");
+            string dstFile = Path.Combine(tempDir, "output_16b.wav");
+
+            // Generate 32-bit float audio: 0.1 amplitude 440Hz sine wave
+            int sampleRate = 48000;
+            int numFrames = 4800; // 0.1s
+            var floatBytes = new byte[numFrames * 4];
+
+            for (int i = 0; i < numFrames; i++)
+            {
+                double t = (double)i / sampleRate;
+                float sample = (float)(Math.Sin(2 * Math.PI * 440.0 * t) * 0.1);
+                byte[] b = BitConverter.GetBytes(sample);
+                Array.Copy(b, 0, floatBytes, i * 4, 4);
+            }
+
+            var format = new AudioFormat
+            {
+                Channels = 1,
+                BitsPerSample = 32,
+                SampleRate = (uint)sampleRate,
+                SampleCount = (uint)numFrames,
+                FormatTag = 3 // IEEE_FLOAT
+            };
+
+            var wav = WavFile.FromRaw(format, floatBytes);
+            wav.Save(srcFile);
+
+            // Convert to 16-bit WAV with resampler
+            using var logger = new ConversionLogger("NUL");
+            var engine = new ConversionEngine(TestSignatures, logger);
+            var options = new ConversionOptions
+            {
+                Direction = ConversionDirection.WavToWav,
+                Resample = new ResampleOptions
+                {
+                    TargetBits = 16,
+                    TargetSampleRate = 48000,
+                    DitherProfile = 6
+                }
+            };
+
+            engine.ConvertFile(srcFile, dstFile, options);
+
+            Assert.True(File.Exists(dstFile));
+            var outWav = WavFile.Open(dstFile);
+            Assert.Equal((ushort)16, outWav.Format.BitsPerSample);
+            Assert.Equal((ushort)1, outWav.Format.FormatTag);
+
+            var samples = outWav.GetInterleavedSamples();
+            Assert.Equal(numFrames, samples.Length);
+
+            // Expected amplitude: 0.1 * 32767 ≈ 3276. Check that peak is close to 3276 and NOT 15000+ (which would indicate float misinterpreted as int32)
+            int maxAbs = samples.Select(Math.Abs).Max();
+            Assert.True(maxAbs > 3000 && maxAbs < 3600, $"Expected max amplitude around 3276, got {maxAbs}");
+
+            double mean = samples.Average();
+            Assert.True(Math.Abs(mean) < 20, $"Expected mean close to 0, got {mean}");
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                try { Directory.Delete(tempDir, true); } catch { }
+            }
+        }
+    }
 }

@@ -60,6 +60,20 @@ public sealed class WavFile
         int totalSamples = AudioData.Length / bytesPerSample;
         var interleaved = new int[totalSamples];
 
+        if (Format.IsFloat && Format.BitsPerSample == 32)
+        {
+            for (int i = 0; i < totalSamples; i++)
+            {
+                float f = BitConverter.ToSingle(AudioData, i * 4);
+                if (float.IsNaN(f)) f = 0.0f;
+                else if (f > 1.0f) f = 1.0f;
+                else if (f < -1.0f) f = -1.0f;
+
+                interleaved[i] = (int)Math.Round(f * 2147483647.0);
+            }
+            return interleaved;
+        }
+
         for (int i = 0; i < totalSamples; i++)
         {
             int v = 0;
@@ -131,10 +145,21 @@ public sealed class WavFile
                 reader.ReadUInt16(); // block align
                 ushort bitsPerSample = reader.ReadUInt16();
 
+                ushort effectiveFormatTag = audioFormatTag;
+
                 long remaining = chunkSize - 16;
                 if (remaining > 0)
                 {
-                    reader.ReadBytes((int)remaining); // extension WAVE_FORMAT_EXTENSIBLE ignorée pour l'instant
+                    byte[] extra = reader.ReadBytes((int)remaining);
+                    // Support WAVE_FORMAT_EXTENSIBLE (0xFFFE / 65534)
+                    if (audioFormatTag == 0xFFFE && extra.Length >= 10)
+                    {
+                        ushort subFormat = BitConverter.ToUInt16(extra, 8);
+                        if (subFormat == 1 || subFormat == 3)
+                        {
+                            effectiveFormatTag = subFormat;
+                        }
+                    }
                 }
 
                 format = new AudioFormat
@@ -142,7 +167,8 @@ public sealed class WavFile
                     Channels = channels,
                     BitsPerSample = bitsPerSample,
                     SampleRate = sampleRate,
-                    SampleCount = 0
+                    SampleCount = 0,
+                    FormatTag = effectiveFormatTag
                 };
             }
             else if (chunkId == "data")
@@ -203,9 +229,10 @@ public sealed class WavFile
         writer.Write(riffSize);
         writer.Write("WAVE".ToCharArray());
 
+        ushort tag = Format.FormatTag == 3 ? (ushort)3 : (ushort)1;
         writer.Write("fmt ".ToCharArray());
         writer.Write(16u);
-        writer.Write((ushort)1); // PCM
+        writer.Write(tag); // 1 = PCM, 3 = IEEE_FLOAT
         writer.Write(Format.Channels);
         writer.Write(Format.SampleRate);
         writer.Write(byteRate);

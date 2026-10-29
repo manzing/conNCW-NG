@@ -135,7 +135,7 @@ public sealed class ConversionEngine
             int effectiveRate = options.Resample.TargetSampleRate > 0 ? options.Resample.TargetSampleRate : (int)wav.Format.SampleRate;
             int targetBits = options.Resample.TargetBits > 0 ? options.Resample.TargetBits : 16;
 
-            if (options.BypassLowDepth && wav.Format.BitsPerSample <= targetBits && wav.Format.SampleRate == effectiveRate)
+            if (options.BypassLowDepth && !wav.Format.IsFloat && wav.Format.BitsPerSample <= targetBits && wav.Format.SampleRate == effectiveRate)
             {
                 bypassed = true;
             }
@@ -187,7 +187,7 @@ public sealed class ConversionEngine
             int effectiveRate = options.Resample.TargetSampleRate > 0 ? options.Resample.TargetSampleRate : (int)wav.Format.SampleRate;
             int targetBits = options.Resample.TargetBits > 0 ? options.Resample.TargetBits : 16;
 
-            if (options.BypassLowDepth && wav.Format.BitsPerSample <= targetBits && wav.Format.SampleRate == effectiveRate)
+            if (options.BypassLowDepth && !wav.Format.IsFloat && wav.Format.BitsPerSample <= targetBits && wav.Format.SampleRate == effectiveRate)
             {
                 bypassed = true;
             }
@@ -323,7 +323,7 @@ public sealed class ConversionEngine
             int effectiveRate = options.Resample.TargetSampleRate > 0 ? options.Resample.TargetSampleRate : (int)wav.Format.SampleRate;
             int targetBits = options.Resample.TargetBits > 0 ? options.Resample.TargetBits : 16;
 
-            if (options.BypassLowDepth && wav.Format.BitsPerSample <= targetBits && wav.Format.SampleRate == effectiveRate)
+            if (options.BypassLowDepth && !wav.Format.IsFloat && wav.Format.BitsPerSample <= targetBits && wav.Format.SampleRate == effectiveRate)
             {
                 string destDir = Path.GetDirectoryName(destPath) ?? string.Empty;
                 if (!string.IsNullOrEmpty(destDir) && !Directory.Exists(destDir))

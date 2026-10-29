@@ -11,7 +11,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <None Include="Signatures\signatures.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Signatures\signatures.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="$(MSBuildThisFileDirectory)..\..\lib\win-x64\*.dll" Link="%(FileName)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

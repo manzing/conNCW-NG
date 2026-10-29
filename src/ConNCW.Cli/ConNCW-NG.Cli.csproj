@@ -25,4 +25,11 @@
     <ProjectReference Include="..\ConNCW.Core\ConNCW.Core.csproj" />
   </ItemGroup>
 
+  <Target Name="CopyNativeDllsToPublish" AfterTargets="Publish">
+    <ItemGroup>
+      <NativeDlls Include="$(MSBuildThisFileDirectory)..\..\lib\win-x64\*.dll" />
+    </ItemGroup>
+    <Copy SourceFiles="@(NativeDlls)" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" />
+  </Target>
+
 </Project>

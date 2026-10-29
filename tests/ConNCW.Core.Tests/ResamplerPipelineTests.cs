@@ -159,11 +159,13 @@ public class ResamplerPipelineTests
             dir = Path.GetDirectoryName(dir) ?? string.Empty;
         }
 
-        string cliExe = Path.Combine(dir, "src", "ConNCW.Cli", "bin", "Release", "net8.0", "conNCW-NG.exe");
-        if (!File.Exists(cliExe))
-        {
-            cliExe = Path.Combine(dir, "src", "ConNCW.Cli", "bin", "x64", "Debug", "net8.0", "conNCW-NG.exe");
-        }
+        string[] candidates = [
+            Path.Combine(dir, "src", "ConNCW.Cli", "bin", "x64", "Release", "net8.0", "conNCW-NG.exe"),
+            Path.Combine(dir, "src", "ConNCW.Cli", "bin", "Release", "net8.0", "conNCW-NG.exe"),
+            Path.Combine(dir, "src", "ConNCW.Cli", "bin", "x64", "Debug", "net8.0", "conNCW-NG.exe"),
+            Path.Combine(dir, "src", "ConNCW.Cli", "bin", "Debug", "net8.0", "conNCW-NG.exe")
+        ];
+        string cliExe = candidates.FirstOrDefault(File.Exists) ?? candidates[0];
         Assert.True(File.Exists(cliExe), $"CLI executable not found at: {cliExe}");
 
         string tempDir = Path.Combine(Path.GetTempPath(), "cli_folder_test_" + Guid.NewGuid().ToString("N"));

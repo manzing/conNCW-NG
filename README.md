@@ -15,6 +15,8 @@ Next-generation audio pipeline for **NCW** (Native Instruments Kontakt compresse
   - Embedded C API bindings to high-grade `resampler.dll` (backed by libsndfile & FFTW3).
   - Full support for 64-bit double-precision processing (`--doubleprecision`), customizable noise-shaping dither profiles (`--ns 0..15`, default Lipshitz 6), dither amounts, and target sample rates (`-sr`).
 
+  **ReSampler DLL Project : https://github.com/manzing/ReSampler**
+
 - **Selective Low Bit-Depth Bypass (`--bypass-lowdepth` / `--bypass-16bit`)**:
   - Optional high-speed bypass flag: when converting to a target depth (e.g. 16-bit), any audio sample that is already $\le$ 16 bits (such as 16-bit or 8-bit files) and matches the target sample rate is bypassed directly.
   - For NCW-to-NCW, the NCW header is inspected in $\mu$s without decoding audio blocks, and the file is copied directly without recompression or CPU waste.

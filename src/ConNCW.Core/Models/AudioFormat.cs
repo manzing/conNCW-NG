@@ -10,6 +10,9 @@ public sealed record AudioFormat
     public required ushort BitsPerSample { get; init; }
     public required uint SampleRate { get; init; }
     public required uint SampleCount { get; init; }
+    public ushort FormatTag { get; init; } = 1; // 1 = WAVE_FORMAT_PCM, 3 = WAVE_FORMAT_IEEE_FLOAT
+
+    public bool IsFloat => FormatTag == 3;
 
     /// <summary>Validation structurelle générique, utilisée en mode tolérant / bypass.</summary>
     public bool IsPlausible()

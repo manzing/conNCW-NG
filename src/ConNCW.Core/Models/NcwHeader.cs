@@ -19,7 +19,8 @@ public sealed class NcwHeader
     public uint TableOffset { get; init; }   // block_def_offset, doit valoir 120 (0x78)
     public uint DataOffset { get; init; }    // blocks_offset
     public uint DataSize { get; init; }      // blocks_size
-    public byte[] SomeData { get; init; } = new byte[88];
+    public uint SampleFormatWord { get; init; } // mot de format à l'offset 32 (0x20)
+    public byte[] SomeData { get; init; } = new byte[84]; // 84 octets opaques (offsets 36..119)
 
     public uint[] BlockOffsets { get; set; } = Array.Empty<uint>();
 
@@ -39,12 +40,8 @@ public sealed class NcwHeader
     {
         get
         {
-            int n = (int)(NumSamples / BlockSampleCount);
-            if (NumSamples % BlockSampleCount != 0)
-            {
-                n++;
-            }
-            return Math.Max(n, 1);
+            if (NumSamples == 0) return 0;
+            return (int)((NumSamples + BlockSampleCount - 1) / BlockSampleCount);
         }
     }
 }

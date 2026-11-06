@@ -2,6 +2,11 @@
 
 Next-generation audio pipeline for **NCW** (Native Instruments Kontakt compressed audio) and **WAV** formats, completely rewritten in C# (.NET 8 LTS) with native **ReSampler** DSP integration, parallel multi-threading, in-memory audio conversions, and automated inventory/signature management.
 
+## What is new in 2.1.0
+
+- **Stream-based decoding API:** `NcwFile.Open(Stream)` and `NcwFile.ReadHeaderOnly(Stream)` decode NCW audio from any stream, and `NcwFile.FromBytes(byte[])` decodes straight from a memory buffer - no temporary file needed. The decoder leaves the caller stream open; the file-path overloads are unchanged.
+- **No audio change:** the decoding path and the produced samples are identical; this release only widens the Core API.
+
 ---
 
 ## Key Highlights & Architectural Enhancements
@@ -20,6 +25,9 @@ Next-generation audio pipeline for **NCW** (Native Instruments Kontakt compresse
 - **Selective Low Bit-Depth Bypass (`--bypass-lowdepth` / `--bypass-16bit`)**:
   - Optional high-speed bypass flag: when converting to a target depth (e.g. 16-bit), any audio sample that is already $\le$ 16 bits (such as 16-bit or 8-bit files) and matches the target sample rate is bypassed directly.
   - For NCW-to-NCW, the NCW header is inspected in $\mu$s without decoding audio blocks, and the file is copied directly without recompression or CPU waste.
+
+- **Stream-Based Decoding API:**
+  - `NcwFile` reads and decodes from any `Stream` or from a byte array (`FromBytes`), in addition to file paths, so audio can be handled fully in memory or straight from a container stream.
 
 - **Parallel Multi-Threaded Processing (`-t` / `--threads`)**:
   - Leverages all available CPU logical cores by default for parallel batch processing across files.

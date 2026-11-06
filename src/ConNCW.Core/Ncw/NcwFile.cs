@@ -36,7 +36,12 @@ public sealed class NcwFile
     public static NcwHeader ReadHeaderOnly(string path, SignatureStore signatures, bool bypassSignature = true)
     {
         using var stream = File.OpenRead(path);
-        using var reader = new BinaryReader(stream);
+        return ReadHeaderOnly(stream, signatures, bypassSignature);
+    }
+
+    public static NcwHeader ReadHeaderOnly(Stream stream, SignatureStore signatures, bool bypassSignature = true)
+    {
+        using var reader = new BinaryReader(stream, System.Text.Encoding.ASCII, leaveOpen: true);
 
         var header = ReadHeaderCore(reader, signatures, bypassSignature);
 
@@ -95,7 +100,18 @@ public sealed class NcwFile
     public static NcwFile Open(string path, SignatureStore signatures, bool bypassSignature = false)
     {
         using var stream = File.OpenRead(path);
-        using var reader = new BinaryReader(stream);
+        return Open(stream, signatures, bypassSignature);
+    }
+
+    public static NcwFile FromBytes(byte[] bytes, SignatureStore signatures, bool bypassSignature = false)
+    {
+        using var stream = new MemoryStream(bytes);
+        return Open(stream, signatures, bypassSignature);
+    }
+
+    public static NcwFile Open(Stream stream, SignatureStore signatures, bool bypassSignature = false)
+    {
+        using var reader = new BinaryReader(stream, System.Text.Encoding.ASCII, leaveOpen: true);
 
         var header = ReadHeaderCore(reader, signatures, bypassSignature);
 
@@ -153,7 +169,7 @@ public sealed class NcwFile
         return new NcwFile(header, samples);
     }
 
-    private static int[] DecodeBlocks(FileStream stream, BinaryReader reader, NcwHeader header)
+    private static int[] DecodeBlocks(Stream stream, BinaryReader reader, NcwHeader header)
     {
         int channels = Math.Max((int)header.Channels, 1);
         long totalFrames = header.NumSamples;
